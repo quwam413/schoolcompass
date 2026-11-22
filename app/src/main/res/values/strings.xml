@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">SchoolCompass</string>
+    <string name="tagline_subtitle">Find, compare, and connect with the right school near you</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="tab_discover">Discover</string>
+    <string name="tab_messages">Messages</string>
+    <string name="tab_portal">Portal</string>
+    <string name="tab_admin">Admin Hub</string>
+    <string name="tab_progressive_tutors">THE PROGRESSIVE TUTORS</string>
+    <string name="tab_adverts">Paid Adverts</string>
+    <string name="tab_ai_advisor">Compass AI</string>
+    <string name="notification_channel_name">School Announcements</string>
+    <string name="notification_channel_desc">Urgent announcements and event updates from schools</string>
+</resources>

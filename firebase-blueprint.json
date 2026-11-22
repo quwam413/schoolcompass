@@ -1,0 +1,414 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private registration profile for a parent or school administrator.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the user." },
+        "role": { "type": "string", "enum": ["parent", "admin"], "description": "Registered account role." },
+        "displayName": { "type": "string", "description": "Full display name." },
+        "email": { "type": "string", "description": "Account email address." },
+        "phone": { "type": "string", "description": "Optional contact phone number." },
+        "homeAddress": { "type": "string", "description": "Search center or home neighborhood." },
+        "homeLat": { "type": "number", "description": "Latitude of default search center." },
+        "homeLng": { "type": "number", "description": "Longitude of default search center." },
+        "searchRadiusKm": { "type": "integer", "description": "Preferred school search radius in kilometers." },
+        "childSummary": { "type": "string", "description": "Optional summary of child grade interests." },
+        "favoriteSchoolIds": { "type": "array", "description": "List of school IDs saved by the user as favorites." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
+      },
+      "required": ["userId", "role", "displayName", "email", "homeLat", "homeLng", "searchRadiusKm", "createdAt", "updatedAt"]
+    },
+    "School": {
+      "title": "School",
+      "description": "Public school directory listing managed in real time by its administrator.",
+      "type": "object",
+      "properties": {
+        "adminUid": { "type": "string", "description": "UID of the registering school administrator." },
+        "adminName": { "type": "string", "description": "Administrator display name." },
+        "name": { "type": "string", "description": "Official school name." },
+        "description": { "type": "string", "description": "Overview of programs and campus culture." },
+        "address": { "type": "string", "description": "Street address of the school." },
+        "latitude": { "type": "number", "description": "Geographic latitude." },
+        "longitude": { "type": "number", "description": "Geographic longitude." },
+        "curriculum": { "type": "string", "enum": ["Nigerian", "British", "Nigerian & British", "IB", "American", "Montessori", "STEM"] },
+        "institutionType": { "type": "string", "enum": ["Primary & Secondary", "University", "Polytechnic", "College of Education", "Technical / Vocational"], "description": "Category of educational institution." },
+        "faithBased": { "type": "boolean", "description": "Whether the school has a faith-based curriculum or ethos." },
+        "faithTradition": { "type": "string", "description": "Faith tradition or Secular." },
+        "specialSchool": { "type": "boolean", "description": "Whether the school is a dedicated special education school." },
+        "specialNeedsSupport": { "type": "string", "description": "Description of special needs support." },
+        "studentMix": { "type": "string", "enum": ["Mixed", "Boys Only", "Girls Only"] },
+        "gradeLevels": { "type": "array", "description": "Programmes and grade levels offered (e.g., Primary, Secondary, NCE, ND/HND, Undergraduate, Postgraduate)." },
+        "coursesOffered": { "type": "array", "description": "Academic courses and fields of study run by the institution." },
+        "activities": { "type": "array", "description": "Extracurricular activities offered." },
+        "sportsFocus": { "type": "array", "description": "Primary sports programs focused on by the school." },
+        "feeMin": { "type": "integer", "description": "Minimum school fee in the specified currency and period." },
+        "feeMax": { "type": "integer", "description": "Maximum school fee in the specified currency and period." },
+        "feeCurrency": { "type": "string", "enum": ["NGN", "USD", "GBP", "EUR"] },
+        "feePeriod": { "type": "string", "enum": ["Per Term", "Per Year"] },
+        "rankingScore": { "type": "number", "description": "Composite school ranking score out of 100." },
+        "districtRank": { "type": "integer", "description": "Rank position in the district." },
+        "rating": { "type": "number", "description": "Parent & inspector rating out of 5.0." },
+        "tuitionTier": { "type": "string", "enum": ["Public / Free", "$", "$$", "$$$"] },
+        "capacity": { "type": "integer", "description": "Maximum student enrollment capacity." },
+        "enrolledCount": { "type": "integer", "description": "Current enrolled student count." },
+        "admissionsOpen": { "type": "boolean", "description": "Whether admissions are currently open." },
+        "contactPhone": { "type": "string", "description": "Public school admissions phone." },
+        "externalPlaceId": { "type": "string", "description": "External OpenStreetMap or map directory identifier when claiming an existing geolocated school." },
+        "websiteUrl": { "type": "string", "description": "Official school website URL used for internet verification." },
+        "verificationStatus": { "type": "string", "enum": ["VERIFIED", "INTERNET_MATCHED", "UNVERIFIED"], "description": "Internet verification status against live public directories and official website." },
+        "verificationSource": { "type": "string", "description": "Human-readable verification evidence source." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "adminUid", "adminName", "name", "description", "address", "latitude", "longitude",
+        "curriculum", "faithBased", "faithTradition", "specialSchool", "specialNeedsSupport",
+        "studentMix", "gradeLevels", "activities", "sportsFocus", "feeMin", "feeMax",
+        "feeCurrency", "feePeriod", "rankingScore", "districtRank", "rating",
+        "tuitionTier", "capacity", "enrolledCount", "admissionsOpen", "createdAt", "updatedAt"
+      ]
+    },
+    "Enrollment": {
+      "title": "Enrollment",
+      "description": "Parent enrollment application to a school.",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "parentName": { "type": "string" },
+        "studentName": { "type": "string" },
+        "gradeApplying": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "WAITLISTED", "DECLINED"] },
+        "adminResponse": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PAID", "PENDING_VERIFICATION"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "schoolId", "schoolName", "adminUid", "parentUid", "parentName",
+        "studentName", "gradeApplying", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "StudentRecord": {
+      "title": "StudentRecord",
+      "description": "Enrolled student academic and attendance summary shared between school admin and parent.",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "studentName": { "type": "string" },
+        "gradeLevel": { "type": "string" },
+        "attendanceRate": { "type": "number" },
+        "presentDays": { "type": "integer" },
+        "absentDays": { "type": "integer" },
+        "tardyDays": { "type": "integer" },
+        "gpa": { "type": "number" },
+        "overallAverage": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "parentUid", "adminUid", "schoolId", "schoolName", "studentName", "gradeLevel",
+        "attendanceRate", "presentDays", "absentDays", "tardyDays", "gpa", "overallAverage",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "AttendanceLog": {
+      "title": "AttendanceLog",
+      "description": "Daily attendance entry for an enrolled student.",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "dateLabel": { "type": "string" },
+        "status": { "type": "string", "enum": ["PRESENT", "ABSENT", "TARDY", "EXCUSED"] },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "adminUid", "dateLabel", "status", "createdAt"]
+    },
+    "SubjectGrade": {
+      "title": "SubjectGrade",
+      "description": "Academic subject grade and teacher remark for an enrolled student.",
+      "type": "object",
+      "properties": {
+        "parentUid": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "subject": { "type": "string" },
+        "score": { "type": "number" },
+        "letterGrade": { "type": "string" },
+        "term": { "type": "string" },
+        "teacherRemark": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["parentUid", "adminUid", "subject", "score", "letterGrade", "term", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct messaging thread between a parent and a school administrator.",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "parentUid": { "type": "string" },
+        "parentName": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "adminName": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "lastSenderUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "schoolId", "schoolName", "parentUid", "parentName", "adminUid", "adminName",
+        "memberUids", "lastMessage", "lastSenderUid", "createdAt", "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Individual message within a parent-administrator conversation.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["parent", "admin"] },
+        "text": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "senderName", "senderRole", "text", "memberUids", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "School announcement and event update broadcast to families.",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "adminUid": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "category": { "type": "string", "enum": ["Urgent", "Event", "Academic", "Admissions"] },
+        "eventDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "schoolName", "adminUid", "title", "body", "category", "createdAt"]
+    },
+    "Advert": {
+      "title": "Advert",
+      "description": "Paid sponsored advert campaign for schools, tutoring services, or education programs.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "advertiserName": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "category": { "type": "string", "enum": ["School Admissions", "Progressive Tutors", "Exam Prep", "Sports & Camps", "Educational Resources"] },
+        "curriculumFocus": { "type": "string", "enum": ["All", "Nigerian", "British", "Cambridge", "Nigerian & British"] },
+        "planTier": { "type": "string", "enum": ["Starter Boost", "Featured Spotlight", "District Hero"] },
+        "planPriceLabel": { "type": "string" },
+        "durationDays": { "type": "integer" },
+        "targetLocation": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "ctaLabel": { "type": "string" },
+        "contactInfo": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PAUSED", "ENDED"] },
+        "paymentId": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PAID", "PENDING_VERIFICATION"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerUid", "advertiserName", "title", "body", "category", "curriculumFocus",
+        "planTier", "planPriceLabel", "durationDays", "targetLocation", "latitude",
+        "longitude", "ctaLabel", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "AdvertInquiry": {
+      "title": "AdvertInquiry",
+      "description": "Parent or student lead submitted in response to a sponsored advert.",
+      "type": "object",
+      "properties": {
+        "advertId": { "type": "string" },
+        "advertTitle": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["NEW", "CONTACTED", "CLOSED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "advertId", "advertTitle", "ownerUid", "senderUid", "senderName",
+        "senderEmail", "message", "status", "createdAt"
+      ]
+    },
+    "ProgressiveTutor": {
+      "title": "ProgressiveTutor",
+      "description": "Online tutoring teacher profile for THE PROGRESSIVE TUTORS supporting Cambridge and Nigerian subjects.",
+      "type": "object",
+      "properties": {
+        "teacherUid": { "type": "string" },
+        "fullName": { "type": "string" },
+        "sex": { "type": "string", "enum": ["Male", "Female"] },
+        "headline": { "type": "string" },
+        "bio": { "type": "string" },
+        "curriculumTracks": { "type": "array" },
+        "cambridgeSubjects": { "type": "array" },
+        "nigerianSubjects": { "type": "array" },
+        "allSubjects": { "type": "array" },
+        "qualifications": { "type": "string" },
+        "yearsExperience": { "type": "integer" },
+        "hourlyRate": { "type": "integer" },
+        "currency": { "type": "string", "enum": ["NGN", "USD", "GBP", "EUR"] },
+        "meetingPlatform": { "type": "string" },
+        "availability": { "type": "string" },
+        "locationLabel": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "rating": { "type": "number" },
+        "onlineActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "teacherUid", "fullName", "sex", "headline", "bio", "curriculumTracks",
+        "cambridgeSubjects", "nigerianSubjects", "allSubjects", "qualifications",
+        "yearsExperience", "hourlyRate", "currency", "meetingPlatform", "availability",
+        "locationLabel", "latitude", "longitude", "rating", "onlineActive",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "TutorSession": {
+      "title": "TutorSession",
+      "description": "Online tutoring session booking between a client/parent and a Progressive Tutor.",
+      "type": "object",
+      "properties": {
+        "tutorId": { "type": "string" },
+        "tutorName": { "type": "string" },
+        "teacherUid": { "type": "string" },
+        "clientUid": { "type": "string" },
+        "clientName": { "type": "string" },
+        "studentName": { "type": "string" },
+        "curriculumTrack": { "type": "string", "enum": ["Cambridge", "Nigerian", "Cambridge & Nigerian"] },
+        "subject": { "type": "string" },
+        "preferredSchedule": { "type": "string" },
+        "notes": { "type": "string" },
+        "meetingLink": { "type": "string" },
+        "status": { "type": "string", "enum": ["REQUESTED", "CONFIRMED", "COMPLETED", "CANCELLED"] },
+        "paymentId": { "type": "string" },
+        "paymentStatus": { "type": "string", "enum": ["UNPAID", "PAID", "PENDING_VERIFICATION"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "tutorId", "tutorName", "teacherUid", "clientUid", "clientName",
+        "studentName", "curriculumTrack", "subject", "preferredSchedule",
+        "status", "createdAt", "updatedAt"
+      ]
+    },
+    "PaymentTransaction": {
+      "title": "PaymentTransaction",
+      "description": "Payment ledger record for school fees/deposits, paid adverts, and tutoring sessions.",
+      "type": "object",
+      "properties": {
+        "payerUid": { "type": "string" },
+        "payerName": { "type": "string" },
+        "payerEmail": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "paymentType": { "type": "string", "enum": ["SCHOOL_APPLICATION_FEE", "TUITION_DEPOSIT", "ADVERT_CAMPAIGN", "TUTOR_SESSION"] },
+        "referenceId": { "type": "string" },
+        "referenceTitle": { "type": "string" },
+        "amount": { "type": "integer" },
+        "currency": { "type": "string", "enum": ["NGN", "USD", "GBP", "EUR"] },
+        "paymentMethod": { "type": "string", "enum": ["Card Payment", "Bank Transfer", "USSD / Instant Transfer", "Mobile Wallet"] },
+        "gatewayProvider": { "type": "string", "enum": ["Paystack", "Flutterwave", "Stripe", "Direct Bank"] },
+        "gatewayReference": { "type": "string" },
+        "receiptNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["PAID", "PENDING_VERIFICATION", "REFUNDED", "FAILED"] },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "payerUid", "payerName", "payerEmail", "recipientUid", "recipientName",
+        "paymentType", "referenceId", "referenceTitle", "amount", "currency",
+        "paymentMethod", "gatewayProvider", "gatewayReference", "receiptNumber",
+        "status", "createdAt", "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user registration profile keyed by Firebase Auth UID."
+    },
+    "/schools/{schoolId}": {
+      "schema": { "$ref": "#/entities/School" },
+      "description": "Discoverable school directory profiles."
+    },
+    "/enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/Enrollment" },
+      "description": "Enrollment applications linking parents and schools."
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/StudentRecord" },
+      "description": "Enrolled student records visible to parent and school admin."
+    },
+    "/students/{studentId}/attendance/{logId}": {
+      "schema": { "$ref": "#/entities/AttendanceLog" },
+      "description": "Student daily attendance logs."
+    },
+    "/students/{studentId}/grades/{gradeId}": {
+      "schema": { "$ref": "#/entities/SubjectGrade" },
+      "description": "Student academic subject grades and remarks."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct parent-to-school-administrator conversation threads."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages inside a parent-administrator conversation."
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "School announcements and event updates."
+    },
+    "/adverts/{advertId}": {
+      "schema": { "$ref": "#/entities/Advert" },
+      "description": "Paid sponsored adverts created by schools, tutors, and partners."
+    },
+    "/advert_inquiries/{inquiryId}": {
+      "schema": { "$ref": "#/entities/AdvertInquiry" },
+      "description": "Submitted inquiries/leads on sponsored adverts."
+    },
+    "/tutors/{tutorId}": {
+      "schema": { "$ref": "#/entities/ProgressiveTutor" },
+      "description": "Online tutoring teacher profiles under THE PROGRESSIVE TUTORS."
+    },
+    "/tutor_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/TutorSession" },
+      "description": "Online tutoring session bookings linking clients and teachers."
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PaymentTransaction" },
+      "description": "Verified payment records and receipts for school fees, adverts, and tutoring."
+    }
+  }
+}
