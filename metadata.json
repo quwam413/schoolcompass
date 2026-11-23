@@ -1,6 +1,6 @@
 {
-  "name": "SchoolCompass",
-  "description": "School discovery with Google Maps radius search, curriculum & activity filtering, parent-admin messaging, real-time enrollment management, and secure student progress portal.",
+  "name": "Skolquik",
+  "description": "Skolquik — Search Smart, Enroll Fast. School discovery with interactive OpenStreetMap & Google Maps radius search, Nigerian/British curricula, courses, Progressive Tutors, parent-admin messaging, and family portal.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

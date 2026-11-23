@@ -205,7 +205,7 @@ fun PaymentCheckoutDialog(
                                 modifier = Modifier.padding(10.dp),
                                 verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Text("SchoolCompass Settlement Account", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                Text("Skolquik Settlement Account", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                                 Text("Bank: Providus / Zenith Escrow • Acct: 1029384756", style = MaterialTheme.typography.bodySmall)
                                 Text("Status will be verified by the recipient or Platform Admin.", style = MaterialTheme.typography.labelSmall)
                             }

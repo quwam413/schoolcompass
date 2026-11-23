@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "SchoolCompass"
+rootProject.name = "Skolquik"
 
 include(":app")

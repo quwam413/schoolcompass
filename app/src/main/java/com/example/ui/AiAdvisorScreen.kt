@@ -143,7 +143,7 @@ fun AiAdvisorScreen(
                         }
                         Column {
                             Text(
-                                text = "Compass AI Advisor",
+                                text = "Skolquik AI Advisor",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -225,7 +225,7 @@ fun AiAdvisorScreen(
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                             Text(
-                                text = "Compass AI keeps multi-turn context across follow-up questions and grounds recommendations in live Google Maps coordinates, distances, curricula, courses, sports, and your saved favorites.",
+                                text = "Skolquik AI keeps multi-turn context across follow-up questions and grounds recommendations in live Google Maps coordinates, distances, curricula, courses, sports, and your saved favorites.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
@@ -317,7 +317,7 @@ fun AiAdvisorScreen(
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     } else {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send to Compass AI")
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send to Skolquik AI")
                     }
                 }
             }
@@ -362,7 +362,7 @@ private fun AiChatBubble(message: AiAdvisorMessage) {
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = message.modelLabel ?: "Compass AI",
+                            text = message.modelLabel ?: "Skolquik AI",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

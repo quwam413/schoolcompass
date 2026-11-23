@@ -664,7 +664,7 @@ fun SchoolDetailView(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "This institution exists at these coordinates in public map directories, but has not been claimed on SchoolCompass yet. Claiming preserves its geolocation and publishes full courses and program details to Firestore.",
+                    text = "This institution exists at these coordinates in public map directories, but has not been claimed on Skolquik yet. Claiming preserves its geolocation and publishes full courses and program details to Firestore.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.padding(12.dp)

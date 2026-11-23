@@ -201,7 +201,7 @@ object ExternalSchoolService {
             val descParts = buildList {
                 add("Publicly mapped ${institutionType.lowercase(Locale.US)} discovered via OpenStreetMap.")
                 if (operatorTag.isNotEmpty()) add("Operator: $operatorTag.")
-                add("Not yet registered on SchoolCompass — administrators can claim this listing to add courses, programmes, fee ranges, and sports.")
+                add("Not yet registered on Skolquik — administrators can claim this listing to add courses, programmes, fee ranges, and sports.")
             }
 
             parsed.add(

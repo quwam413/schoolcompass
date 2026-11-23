@@ -459,7 +459,7 @@ fun PaidAdvertsScreen(
         PaymentCheckoutDialog(
             title = "Pay Advert Campaign",
             subtitle = "${matchedPlan.tier} • ${ad.title}",
-            recipientName = "SchoolCompass Paid Adverts",
+            recipientName = "Skolquik Paid Adverts",
             amount = matchedPlan.amountNgn,
             currency = "NGN",
             isBusy = isBusy,
@@ -705,7 +705,7 @@ private fun AdvertEditorDialog(
         PaymentCheckoutDialog(
             title = "Paid Advert Checkout",
             subtitle = "${selectedPlan.tier} • ${title.ifBlank { advertiserName }}",
-            recipientName = "SchoolCompass Paid Adverts",
+            recipientName = "Skolquik Paid Adverts",
             amount = selectedPlan.amountNgn,
             currency = "NGN",
             isBusy = isBusy,

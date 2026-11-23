@@ -43,7 +43,8 @@ class ExampleRobolectricTest {
     fun `read string from context`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val appName = context.getString(R.string.app_name)
-        assertEquals("SchoolCompass", appName)
+        assertEquals("Skolquik", appName)
+        assertEquals("SEARCH SMART, ENROLL FAST.", context.getString(R.string.app_tagline))
     }
 
     @Test
@@ -519,5 +520,71 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("radius_use_my_location_button").performClick()
         composeTestRule.waitForIdle()
         assertTrue(gpsRequested)
+    }
+
+    @Test
+    fun `skolquik opening logo and launcher icon drawables load cleanly`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val logoDrawable = context.getDrawable(R.drawable.img_skolquik_opening_logo)
+        val iconDrawable = context.getDrawable(R.drawable.img_launcher_foreground)
+        assertTrue("Opening logo drawable should exist", logoDrawable != null && logoDrawable.intrinsicWidth > 0)
+        assertTrue("Launcher foreground drawable should exist", iconDrawable != null && iconDrawable.intrinsicWidth > 0)
+    }
+
+    @Test
+    fun `authScreen renders skolquik opening logo and sign in actions without crashing`() {
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.auth.AuthScreen(onAuthSuccess = {})
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("opening_brand_logo").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("google_sign_in_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("admin_sign_in_button").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `discoverScreen renders without CameraUpdateFactory or scroll crash`() {
+        val sampleSchool = School(
+            id = "disc_1",
+            adminUid = "admin_disc",
+            name = "Skolquik Model College",
+            address = "Ikorodu, Lagos",
+            latitude = 6.6210,
+            longitude = 3.5150
+        )
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.DiscoverScreen(
+                    schoolsUiState = UiState.Success(listOf(sampleSchool)),
+                    filteredSchools = listOf(SchoolWithDistance(sampleSchool, 0.8)),
+                    filter = com.example.data.SchoolSearchFilter(
+                        centerLat = 6.6194,
+                        centerLng = 3.5105,
+                        centerLabel = "Ikorodu, Lagos",
+                        radiusKm = 15
+                    ),
+                    isBusy = false,
+                    onUpdateFilter = {},
+                    onResetFilters = {},
+                    onMessageAdmin = {},
+                    onSubmitEnrollment = { _, _, _, _, _ -> },
+                    onSeedSampleSchools = {},
+                    onRegisterSchoolClick = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_advert_grid_4x2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("discover_search_input").assertIsDisplayed()
+    }
+
+    @Test
+    fun `mainActivity launches onCreate and renders initial content without crashing`() {
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
+        controller.setup()
+        val activity = controller.get()
+        assertTrue("MainActivity should not finish during launch", !activity.isFinishing)
     }
 }

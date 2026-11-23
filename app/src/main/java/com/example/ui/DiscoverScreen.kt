@@ -320,7 +320,7 @@ fun DiscoverScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                         },
-                        label = { Text("Ask Compass AI") },
+                        label = { Text("Ask Skolquik AI") },
                         modifier = Modifier.testTag("discover_ai_advisor_chip")
                     )
                 }

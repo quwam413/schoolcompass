@@ -1001,7 +1001,7 @@ class SchoolViewModel(
                         payerName = payerName,
                         payerEmail = userEmail,
                         recipientUid = currentUserId,
-                        recipientName = "SchoolCompass Paid Adverts",
+                        recipientName = "Skolquik Paid Adverts",
                         paymentType = "ADVERT_CAMPAIGN",
                         referenceId = advertId,
                         referenceTitle = "${matchedPlan.tier} • ${advert.title}",
@@ -1041,7 +1041,7 @@ class SchoolViewModel(
                 payerName = payerName,
                 payerEmail = userEmail,
                 recipientUid = currentUserId,
-                recipientName = "SchoolCompass Paid Adverts",
+                recipientName = "Skolquik Paid Adverts",
                 paymentType = "ADVERT_CAMPAIGN",
                 referenceId = advert.id,
                 referenceTitle = "${matchedPlan.tier} • ${advert.title}",
@@ -1409,13 +1409,13 @@ class SchoolViewModel(
             } catch (e: TimeoutCancellationException) {
                 Log.e(TAG, "Firebase AI Advisor chat timed out", e)
                 _aiChatMessages.update { it.filterNot { m -> m.id == assistantMsgId } }
-                _aiChatError.value = "Compass AI timed out after 60 seconds. Check your connection and try again."
+                _aiChatError.value = "Skolquik AI timed out after 60 seconds. Check your connection and try again."
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Firebase AI Advisor chat failed", e)
                 _aiChatMessages.update { it.filterNot { m -> m.id == assistantMsgId } }
-                _aiChatError.value = e.localizedMessage ?: "Compass AI request failed."
+                _aiChatError.value = e.localizedMessage ?: "Skolquik AI request failed."
             } finally {
                 _isAiGenerating.value = false
             }

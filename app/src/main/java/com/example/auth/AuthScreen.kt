@@ -125,15 +125,35 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                 .align(Alignment.TopCenter),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            // Opening Skolquik Logo + Tagline Brand Card
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = Color.White,
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("opening_brand_logo")
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.img_skolquik_opening_logo),
+                    contentDescription = "Skolquik — Search Smart, Enroll Fast.",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(104.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(210.dp)
+                    .height(170.dp)
                     .clip(MaterialTheme.shapes.large)
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.img_campus_hero),
-                    contentDescription = "SchoolCompass campus courtyard illustration",
+                    contentDescription = "Skolquik campus courtyard illustration",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -153,19 +173,14 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Filled.School,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondary
-                            )
-                        }
-                    }
+                    Image(
+                        painter = painterResource(id = R.drawable.img_launcher_foreground),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                    )
                     Column {
                         Text(
                             text = stringResource(R.string.app_name),
@@ -174,9 +189,9 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "School Discovery & Family Portal",
+                            text = stringResource(R.string.app_tagline),
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color.White.copy(alpha = 0.88f)
+                            color = Color.White.copy(alpha = 0.92f)
                         )
                     }
                 }

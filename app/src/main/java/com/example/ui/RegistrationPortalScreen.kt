@@ -381,7 +381,7 @@ fun RegistrationPortalScreen(
                     onClick = {
                         onSaveProfile(
                             selectedRole,
-                            displayName.ifBlank { defaultName.ifBlank { "SchoolCompass User" } },
+                            displayName.ifBlank { defaultName.ifBlank { "Skolquik User" } },
                             phone.ifBlank { null },
                             homeAddress.ifBlank { null },
                             homeLat,
