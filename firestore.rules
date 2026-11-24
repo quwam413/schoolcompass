@@ -48,8 +48,12 @@ service cloud.firestore {
     }
 
     function isValidSchool(data) {
-      return data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
-        data.adminName is string && data.adminName.size() >= 1 && data.adminName.size() <= 80 &&
+      return data.adminUid is string &&
+        data.adminName is string &&
+        (
+          (data.adminUid.size() >= 1 && data.adminUid.size() <= 128 && data.adminName.size() >= 1 && data.adminName.size() <= 80) ||
+          (data.adminUid == '' && ('verificationStatus' in data) && data.verificationStatus in ['VERIFIED_ONLINE', 'INTERNET_MATCHED'] && data.adminName.size() <= 80)
+        ) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 100 &&
         data.description is string && data.description.size() <= 800 &&
         data.address is string && data.address.size() >= 2 && data.address.size() <= 200 &&
@@ -80,16 +84,59 @@ service cloud.firestore {
         (!('contactPhone' in data) || (data.contactPhone is string && data.contactPhone.size() <= 40)) &&
         (!('externalPlaceId' in data) || (data.externalPlaceId is string && data.externalPlaceId.size() <= 128)) &&
         (!('websiteUrl' in data) || (data.websiteUrl is string && data.websiteUrl.size() <= 200)) &&
-        (!('verificationStatus' in data) || (data.verificationStatus in ['VERIFIED', 'INTERNET_MATCHED', 'UNVERIFIED'])) &&
+        (!('verificationStatus' in data) || (data.verificationStatus in ['VERIFIED', 'VERIFIED_ONLINE', 'INTERNET_MATCHED', 'UNVERIFIED'])) &&
         (!('verificationSource' in data) || (data.verificationSource is string && data.verificationSource.size() <= 160)) &&
+        (!('sourceCitations' in data) || (data.sourceCitations is list && data.sourceCitations.size() <= 12 && (data.sourceCitations.size() == 0 || (data.sourceCitations[0] is string && data.sourceCitations[0].size() <= 350)))) &&
+        (!('googleMapsPlaceRef' in data) || (data.googleMapsPlaceRef is string && data.googleMapsPlaceRef.size() <= 160)) &&
+        (!('googleMapsUrl' in data) || (data.googleMapsUrl is string && data.googleMapsUrl.size() <= 300)) &&
+        (!('admissionWindow' in data) || (data.admissionWindow is string && data.admissionWindow.size() <= 120)) &&
+        (!('boardingOption' in data) || (data.boardingOption in ['Day', 'Boarding', 'Day & Boarding', 'Not Specified'])) &&
+        (!('photoUrls' in data) || (data.photoUrls is list && data.photoUrls.size() <= 8 && (data.photoUrls.size() == 0 || (data.photoUrls[0] is string && data.photoUrls[0].size() <= 300)))) &&
+        (!('extraNotes' in data) || (data.extraNotes is string && data.extraNotes.size() <= 600)) &&
+        (!('lastEnrichedByName' in data) || (data.lastEnrichedByName is string && data.lastEnrichedByName.size() <= 80)) &&
         data.createdAt is timestamp && data.createdAt <= request.time &&
         data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isAllowedSchoolUpdate(diffKeys) {
+      return (
+        (
+          (
+            ((existing().adminUid == request.auth.uid || isBootstrappedAdmin()) && incoming().adminUid == existing().adminUid) ||
+            (existing().adminUid == '' && incoming().adminUid == request.auth.uid)
+          ) &&
+          diffKeys.hasOnly([
+            'adminUid', 'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
+            'curriculum', 'institutionType', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
+            'studentMix', 'gradeLevels', 'coursesOffered', 'activities', 'sportsFocus', 'feeMin', 'feeMax',
+            'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
+            'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
+            'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
+            'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
+            'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
+            'updatedAt'
+          ])
+        ) || (
+          incoming().adminUid == existing().adminUid &&
+          diffKeys.hasOnly([
+            'feeMin', 'feeMax', 'feeCurrency', 'feePeriod', 'tuitionTier',
+            'admissionsOpen', 'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes',
+            'coursesOffered', 'gradeLevels', 'activities', 'sportsFocus',
+            'websiteUrl', 'contactPhone', 'description', 'lastEnrichedByName', 'updatedAt',
+            'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'
+          ]) &&
+          (
+            existing().adminUid == '' ||
+            !diffKeys.hasAny(['sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'])
+          )
+        )
+      );
     }
 
     function isValidEnrollment(data) {
       return data.schoolId is string && isValidId(data.schoolId) &&
         data.schoolName is string && data.schoolName.size() >= 2 && data.schoolName.size() <= 100 &&
-        data.adminUid is string && data.adminUid.size() >= 1 && data.adminUid.size() <= 128 &&
+        data.adminUid is string && data.adminUid.size() <= 128 &&
         data.parentUid is string && data.parentUid.size() >= 1 && data.parentUid.size() <= 128 &&
         data.parentName is string && data.parentName.size() >= 1 && data.parentName.size() <= 80 &&
         data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 80 &&
@@ -309,7 +356,10 @@ service cloud.firestore {
       allow create: if isSignedIn() &&
         isValidId(schoolId) &&
         isValidSchool(incoming()) &&
-        incoming().adminUid == request.auth.uid &&
+        (
+          incoming().adminUid == request.auth.uid ||
+          (incoming().adminUid == '' && ('verificationStatus' in incoming()) && incoming().verificationStatus in ['VERIFIED_ONLINE', 'INTERNET_MATCHED'])
+        ) &&
         incoming().keys().hasAll([
           'adminUid', 'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
           'curriculum', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
@@ -325,24 +375,16 @@ service cloud.firestore {
           'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
           'institutionType', 'coursesOffered',
           'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
+          'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
+          'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
           'createdAt', 'updatedAt'
         ]);
 
       allow update: if isSignedIn() &&
         isValidId(schoolId) &&
-        isValidSchool(incoming()) &&
-        (existing().adminUid == request.auth.uid || isBootstrappedAdmin()) &&
-        incoming().adminUid == existing().adminUid &&
         incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly([
-          'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
-          'curriculum', 'institutionType', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
-          'studentMix', 'gradeLevels', 'coursesOffered', 'activities', 'sportsFocus', 'feeMin', 'feeMax',
-          'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
-          'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
-          'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
-          'updatedAt'
-        ]);
+        isAllowedSchoolUpdate(incoming().diff(existing()).affectedKeys()) &&
+        isValidSchool(incoming());
 
       allow delete: if isSignedIn() && isValidId(schoolId) && (existing().adminUid == request.auth.uid || isBootstrappedAdmin());
     }

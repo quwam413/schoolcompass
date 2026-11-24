@@ -17,6 +17,8 @@ import com.example.data.Enrollment
 import com.example.data.ExternalSchoolService
 import com.example.data.FaithFilter
 import com.example.data.GoogleMapsPlatformService
+import com.example.data.GroundingSourceLink
+import com.example.data.OnlineSchoolGroundingService
 import com.example.data.PaymentRepository
 import com.example.data.PaymentTransaction
 import com.example.data.ProgressiveTutor
@@ -71,12 +73,16 @@ sealed interface UiState<out T> {
 
 enum class MainTab {
     DISCOVER,
+    DASHBOARD,
+    SAVED,
     TUTORS,
     MESSAGES,
     PORTAL,
     ADMIN,
     ADVERTS,
-    AI_ADVISOR
+    AI_ADVISOR,
+    SETTINGS,
+    HELP
 }
 
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
@@ -86,7 +92,8 @@ class SchoolViewModel(
     val currentUserId: String,
     val userEmail: String,
     val userDisplayName: String,
-    private val aiAdvisorService: AiSchoolAdvisorService = AiSchoolAdvisorService()
+    private val aiAdvisorService: AiSchoolAdvisorService = AiSchoolAdvisorService(),
+    private val onlineGroundingService: OnlineSchoolGroundingService = OnlineSchoolGroundingService()
 ) : ViewModel() {
 
     private companion object {
@@ -210,6 +217,12 @@ class SchoolViewModel(
     private val _externalDirectoryError = MutableStateFlow<String?>(null)
     val externalDirectoryError: StateFlow<String?> = _externalDirectoryError.asStateFlow()
 
+    private val _onlineGroundingLoading = MutableStateFlow(false)
+    val onlineGroundingLoading: StateFlow<Boolean> = _onlineGroundingLoading.asStateFlow()
+
+    private val _onlineGroundingError = MutableStateFlow<String?>(null)
+    val onlineGroundingError: StateFlow<String?> = _onlineGroundingError.asStateFlow()
+
     private val _isGeocodingLocation = MutableStateFlow(false)
     val isGeocodingLocation: StateFlow<Boolean> = _isGeocodingLocation.asStateFlow()
 
@@ -220,6 +233,17 @@ class SchoolViewModel(
 
     private val _latestPaymentReceipt = MutableStateFlow<PaymentTransaction?>(null)
     val latestPaymentReceipt: StateFlow<PaymentTransaction?> = _latestPaymentReceipt.asStateFlow()
+
+    private val _isHomeRefreshing = MutableStateFlow(false)
+    val isHomeRefreshing: StateFlow<Boolean> = _isHomeRefreshing.asStateFlow()
+
+    private val _discoveredOnlineTutors = MutableStateFlow<List<ProgressiveTutor>>(emptyList())
+
+    private val _onlineTutorsLoading = MutableStateFlow(false)
+    val onlineTutorsLoading: StateFlow<Boolean> = _onlineTutorsLoading.asStateFlow()
+
+    private val _onlineTutorsError = MutableStateFlow<String?>(null)
+    val onlineTutorsError: StateFlow<String?> = _onlineTutorsError.asStateFlow()
 
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
@@ -265,6 +289,17 @@ class SchoolViewModel(
                 .debounce(550L)
                 .collect { key ->
                     fetchExternalSchoolsInternal(key.lat, key.lng, key.radiusKm)
+                }
+        }
+        viewModelScope.launch {
+            _searchFilter
+                .map { it.query.trim() }
+                .distinctUntilChanged()
+                .debounce(650L)
+                .collect { q ->
+                    if (q.length >= 3) {
+                        searchVerifiedSchoolsOnlineInternal(q)
+                    }
                 }
         }
         viewModelScope.launch {
@@ -379,8 +414,11 @@ class SchoolViewModel(
                 val matchesQuery = filter.query.isBlank() ||
                     s.name.contains(filter.query, ignoreCase = true) ||
                     s.address.contains(filter.query, ignoreCase = true) ||
+                    s.description.contains(filter.query, ignoreCase = true) ||
                     s.institutionType.contains(filter.query, ignoreCase = true) ||
                     s.curriculum.contains(filter.query, ignoreCase = true) ||
+                    (s.boardingOption?.contains(filter.query, ignoreCase = true) == true) ||
+                    (s.verificationSource?.contains(filter.query, ignoreCase = true) == true) ||
                     s.gradeLevels.any { it.contains(filter.query, ignoreCase = true) } ||
                     s.coursesOffered.any { it.contains(filter.query, ignoreCase = true) } ||
                     s.activities.any { it.contains(filter.query, ignoreCase = true) } ||
@@ -408,7 +446,7 @@ class SchoolViewModel(
                     filter.selectedSports.all { sport -> s.sportsFocus.contains(sport) }
                 val matchesRank = s.rankingScore >= filter.minRankingScore
                 val matchesFee = filter.maxFeeBudget == null ||
-                    (!s.hasPlatformAdmin() && filter.maxFeeBudget >= 0L) ||
+                    (!s.hasPlatformAdmin() && s.feeMax == 0L && filter.maxFeeBudget >= 0L) ||
                     s.feeMin <= filter.maxFeeBudget
 
                 matchesFavorite && matchesRadius && matchesQuery && matchesInstitutionType && matchesCurriculum && matchesFaith &&
@@ -428,9 +466,19 @@ class SchoolViewModel(
             initialValue = emptyList()
         )
 
+    val allTutorsCombined: StateFlow<List<ProgressiveTutor>> =
+        combine(tutorsState, _discoveredOnlineTutors) { tutorsUi, onlineTutors ->
+            val registered = (tutorsUi as? UiState.Success)?.data.orEmpty()
+            val existingNames = registered.map { it.fullName.trim().lowercase() }.toSet()
+            registered + onlineTutors.filter { it.fullName.trim().lowercase() !in existingNames }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = emptyList()
+        )
+
     val filteredTutors: StateFlow<List<TutorWithDistance>> =
-        combine(tutorsState, _tutorFilter) { tutorsUi, filter ->
-            val tutors = (tutorsUi as? UiState.Success)?.data ?: emptyList()
+        combine(allTutorsCombined, _tutorFilter) { tutors, filter ->
             tutors.filter { it.onlineActive }.map { tutor ->
                 val dist = calculateDistanceKm(
                     filter.clientLat, filter.clientLng,
@@ -598,15 +646,11 @@ class SchoolViewModel(
             _selectedDetailSchoolId.value = null
             return
         }
-        val candidateId = if (school.hasPlatformAdmin()) {
-            school.id
-        } else {
-            school.externalPlaceId?.takeIf { it.isNotBlank() }?.let {
-                ExternalSchoolService.claimSchoolDocId(it)
-            } ?: school.id
-        }
-        val validId = candidateId.trim().takeIf {
+        val trimmedId = school.id.trim()
+        val validId = trimmedId.takeIf {
             it.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))
+        } ?: school.externalPlaceId?.takeIf { it.isNotBlank() }?.let {
+            ExternalSchoolService.claimSchoolDocId(it)
         }
         _selectedDetailSchoolId.value = validId
     }
@@ -658,25 +702,90 @@ class SchoolViewModel(
     private suspend fun fetchExternalSchoolsInternal(lat: Double, lng: Double, radiusKm: Int) {
         _externalDirectoryLoading.value = true
         _externalDirectoryError.value = null
-        val (osmRes, googleRes) = coroutineScope {
+        _onlineGroundingLoading.value = true
+        _onlineGroundingError.value = null
+        val filter = _searchFilter.value
+        val (osmRes, googleRes, groundedRes) = coroutineScope {
             val osmDeferred = async { ExternalSchoolService.fetchNearbyExternalSchools(lat, lng, radiusKm) }
             val googleDeferred = async { GoogleMapsPlatformService.fetchNearbyGooglePlacesSchools(lat, lng, radiusKm) }
-            osmDeferred.await() to googleDeferred.await()
+            val groundedDeferred = async {
+                onlineGroundingService.searchVerifiedOnlineSchools(
+                    query = filter.query,
+                    centerLat = lat,
+                    centerLng = lng,
+                    centerLabel = filter.centerLabel,
+                    radiusKm = radiusKm
+                )
+            }
+            Triple(osmDeferred.await(), googleDeferred.await(), groundedDeferred.await())
         }
         _externalDirectoryLoading.value = false
+        _onlineGroundingLoading.value = false
 
         val googleSchools = googleRes.getOrNull().orEmpty()
+        val groundedSchools = groundedRes.getOrNull().orEmpty()
         val osmSchools = osmRes.getOrNull().orEmpty()
+
         val mergedExternal = ExternalSchoolService.mergeRegisteredAndExternalSchools(
-            registered = googleSchools,
+            registered = ExternalSchoolService.mergeRegisteredAndExternalSchools(
+                registered = googleSchools,
+                external = groundedSchools
+            ),
             external = osmSchools
         )
-        if (mergedExternal.isNotEmpty() || osmRes.isSuccess || googleRes.isSuccess) {
+        if (mergedExternal.isNotEmpty() || osmRes.isSuccess || googleRes.isSuccess || groundedRes.isSuccess) {
             _externalSchools.value = mergedExternal
+            val toPersist = (groundedSchools + googleSchools).distinctBy { it.id }
+            if (toPersist.isNotEmpty()) {
+                repository.upsertDiscoveredOnlineSchools(toPersist).onFailure { err ->
+                    Log.w(TAG, "Cloud upsert for discovered online schools deferred: ${err.localizedMessage}")
+                }
+            }
         } else {
-            val err = googleRes.exceptionOrNull() ?: osmRes.exceptionOrNull()
+            val err = groundedRes.exceptionOrNull() ?: googleRes.exceptionOrNull() ?: osmRes.exceptionOrNull()
             Log.w(TAG, "External school geolocation lookup failed", err)
             _externalDirectoryError.value = err?.localizedMessage ?: "Live map directory lookup unavailable"
+            _onlineGroundingError.value = groundedRes.exceptionOrNull()?.localizedMessage
+        }
+    }
+
+    private suspend fun searchVerifiedSchoolsOnlineInternal(query: String) {
+        val filter = _searchFilter.value
+        _onlineGroundingLoading.value = true
+        _onlineGroundingError.value = null
+        val res = onlineGroundingService.searchVerifiedOnlineSchools(
+            query = query,
+            centerLat = filter.centerLat,
+            centerLng = filter.centerLng,
+            centerLabel = filter.centerLabel,
+            radiusKm = filter.radiusKm
+        )
+        _onlineGroundingLoading.value = false
+        res.onSuccess { discovered ->
+            if (discovered.isNotEmpty()) {
+                _externalSchools.update { current ->
+                    ExternalSchoolService.mergeRegisteredAndExternalSchools(
+                        registered = discovered,
+                        external = current
+                    )
+                }
+                repository.upsertDiscoveredOnlineSchools(discovered).onFailure { err ->
+                    Log.w(TAG, "Cloud upsert for grounded query deferred: ${err.localizedMessage}")
+                }
+            }
+        }.onFailure { err ->
+            Log.w(TAG, "Online school search grounding failed", err)
+            _onlineGroundingError.value = err.localizedMessage ?: "Online grounded search failed"
+        }
+    }
+
+    fun searchVerifiedSchoolsOnline(queryOverride: String? = null) {
+        val targetQuery = (queryOverride ?: _searchFilter.value.query).trim()
+        if (queryOverride != null && queryOverride != _searchFilter.value.query) {
+            _searchFilter.update { it.copy(query = queryOverride) }
+        }
+        viewModelScope.launch {
+            searchVerifiedSchoolsOnlineInternal(targetQuery)
         }
     }
 
@@ -710,6 +819,70 @@ class SchoolViewModel(
         val f = _searchFilter.value
         viewModelScope.launch {
             fetchExternalSchoolsInternal(f.centerLat, f.centerLng, f.radiusKm)
+        }
+    }
+
+    fun refreshHomeFromPullDown() {
+        val f = _searchFilter.value
+        if (_isHomeRefreshing.value) return
+        viewModelScope.launch {
+            _isHomeRefreshing.value = true
+            try {
+                fetchExternalSchoolsInternal(f.centerLat, f.centerLng, f.radiusKm)
+                if (f.query.isNotBlank()) {
+                    searchVerifiedSchoolsOnlineInternal(f.query)
+                }
+            } finally {
+                _isHomeRefreshing.value = false
+            }
+        }
+    }
+
+    fun submitOptionalSchoolDetails(
+        school: School,
+        feeMin: Long,
+        feeMax: Long,
+        feeCurrency: String,
+        feePeriod: String,
+        admissionsOpen: Boolean,
+        admissionWindow: String?,
+        boardingOption: String?,
+        photoUrls: List<String>,
+        extraNotes: String?,
+        coursesOffered: List<String>,
+        gradeLevels: List<String>,
+        websiteUrl: String?,
+        contactPhone: String?,
+        onSuccess: () -> Unit = {}
+    ) {
+        val contributor = currentDisplayName()
+        viewModelScope.launch {
+            _isBusy.value = true
+            val res = repository.submitOptionalSchoolDetails(
+                school = school,
+                contributorName = contributor,
+                feeMin = feeMin,
+                feeMax = feeMax,
+                feeCurrency = feeCurrency,
+                feePeriod = feePeriod,
+                admissionsOpen = admissionsOpen,
+                admissionWindow = admissionWindow,
+                boardingOption = boardingOption,
+                photoUrls = photoUrls,
+                extraNotes = extraNotes,
+                coursesOffered = coursesOffered,
+                gradeLevels = gradeLevels,
+                websiteUrl = websiteUrl,
+                contactPhone = contactPhone
+            )
+            _isBusy.value = false
+            res.onSuccess { persistedId ->
+                _selectedDetailSchoolId.value = persistedId
+                _uiMessages.tryEmit("Extra details saved for ${school.name}")
+                onSuccess()
+            }.onFailure { err ->
+                _uiMessages.tryEmit(err.localizedMessage ?: "Could not save extra school details")
+            }
         }
     }
 
@@ -750,22 +923,29 @@ class SchoolViewModel(
         viewModelScope.launch {
             _isBusy.value = true
             val verification = ExternalSchoolService.verifySchoolOnInternet(school)
+            val resolvedStatus = when {
+                verification.status == "VERIFIED" -> "VERIFIED"
+                school.verificationStatus == "VERIFIED_ONLINE" -> "VERIFIED_ONLINE"
+                verification.status == "INTERNET_MATCHED" -> "INTERNET_MATCHED"
+                else -> school.verificationStatus.ifBlank { verification.status }
+            }
             val enrichedSchool = school.copy(
                 externalPlaceId = school.externalPlaceId ?: verification.matchedExternalId,
                 websiteUrl = school.websiteUrl?.takeIf { it.isNotBlank() } ?: verification.discoveredWebsite,
-                verificationStatus = verification.status,
-                verificationSource = verification.source
+                verificationStatus = resolvedStatus,
+                verificationSource = school.verificationSource?.takeIf { it.isNotBlank() && resolvedStatus == "VERIFIED_ONLINE" }
+                    ?: verification.source
             )
             val res = repository.createOrUpdateSchool(enrichedSchool, isNew)
             _isBusy.value = false
             res.onSuccess {
                 _claimingExternalSchool.value = null
                 val actionLabel = if (!school.externalPlaceId.isNullOrBlank() && (isNew || !school.hasPlatformAdmin())) {
-                    "Existing geolocated school claimed & enriched (${verification.status})"
+                    "School profile claimed & enriched ($resolvedStatus)"
                 } else if (isNew) {
-                    "School registered (${verification.status})"
+                    "School registered ($resolvedStatus)"
                 } else {
-                    "School profile updated (${verification.status})"
+                    "School profile updated ($resolvedStatus)"
                 }
                 _uiMessages.tryEmit(actionLabel)
                 onSuccess()
@@ -784,6 +964,7 @@ class SchoolViewModel(
         onSuccess: () -> Unit = {}
     ) {
         val parentName = currentDisplayName()
+        val effectiveDraft = if (school.hasPlatformAdmin()) paymentDraft else null
         val feeAmount = if (school.feeMin > 0L) {
             (school.feeMin / 20L).coerceIn(5_000L, 50_000L)
         } else {
@@ -797,10 +978,10 @@ class SchoolViewModel(
                 studentName = studentName,
                 gradeApplying = gradeApplying,
                 notes = notes,
-                paymentStatus = if (paymentDraft == null) "UNPAID" else null
+                paymentStatus = if (effectiveDraft == null) "UNPAID" else null
             )
             enrRes.onSuccess { enrollmentId ->
-                if (paymentDraft != null) {
+                if (effectiveDraft != null) {
                     val payRes = paymentRepository.createPaymentTransaction(
                         payerName = parentName,
                         payerEmail = userEmail,
@@ -811,9 +992,9 @@ class SchoolViewModel(
                         referenceTitle = "Application Fee • $studentName ($gradeApplying)",
                         amount = feeAmount,
                         currency = school.feeCurrency,
-                        paymentMethod = paymentDraft.paymentMethod,
-                        gatewayProvider = paymentDraft.gatewayProvider,
-                        notes = paymentDraft.notes
+                        paymentMethod = effectiveDraft.paymentMethod,
+                        gatewayProvider = effectiveDraft.gatewayProvider,
+                        notes = effectiveDraft.notes
                     )
                     _isBusy.value = false
                     payRes.onSuccess { tx ->
@@ -825,7 +1006,12 @@ class SchoolViewModel(
                     }
                 } else {
                     _isBusy.value = false
-                    _uiMessages.tryEmit("Enrollment application sent to ${school.name}")
+                    val actionMsg = if (school.hasPlatformAdmin()) {
+                        "Enrollment application sent to ${school.name}"
+                    } else {
+                        "Enrollment inquiry saved for ${school.name}"
+                    }
+                    _uiMessages.tryEmit(actionMsg)
                     onSuccess()
                 }
             }.onFailure {
@@ -959,26 +1145,6 @@ class SchoolViewModel(
         }
     }
 
-    fun seedSampleSchoolsAroundCenter() {
-        val profile = (userProfileState.value as? UiState.Success)?.data
-        val adminName = profile?.displayName ?: userDisplayName.ifBlank { "School Admin" }
-        val filter = _searchFilter.value
-        viewModelScope.launch {
-            _isBusy.value = true
-            val res = repository.seedSampleDirectoryAround(
-                centerLat = filter.centerLat,
-                centerLng = filter.centerLng,
-                adminName = adminName
-            )
-            _isBusy.value = false
-            res.onSuccess {
-                _uiMessages.tryEmit("Sample schools added around ${filter.centerLabel}")
-            }.onFailure {
-                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to add sample schools")
-            }
-        }
-    }
-
     fun createOrUpdateAdvert(
         advert: Advert,
         isNew: Boolean,
@@ -1083,20 +1249,6 @@ class SchoolViewModel(
                 _uiMessages.tryEmit("Advert removed")
             }.onFailure {
                 _uiMessages.tryEmit(it.localizedMessage ?: "Failed to remove advert")
-            }
-        }
-    }
-
-    fun seedSampleAdverts() {
-        val filter = _searchFilter.value
-        viewModelScope.launch {
-            _isBusy.value = true
-            val res = repository.seedSampleAdvertsAround(filter.centerLat, filter.centerLng)
-            _isBusy.value = false
-            res.onSuccess {
-                _uiMessages.tryEmit("Sample sponsored adverts loaded")
-            }.onFailure {
-                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to load sample adverts")
             }
         }
     }
@@ -1279,16 +1431,31 @@ class SchoolViewModel(
         }
     }
 
-    fun seedSampleTutors() {
-        val filter = _tutorFilter.value
+    fun discoverRealTutorsOnline(queryOverride: String? = null) {
+        val tf = _tutorFilter.value
+        val query = (queryOverride ?: tf.query).trim()
+        if (_onlineTutorsLoading.value) return
         viewModelScope.launch {
-            _isBusy.value = true
-            val res = repository.seedSampleTutorsAround(filter.clientLat, filter.clientLng)
-            _isBusy.value = false
-            res.onSuccess {
-                _uiMessages.tryEmit("Sample Cambridge & Nigerian tutors loaded")
-            }.onFailure {
-                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to load sample tutors")
+            _onlineTutorsLoading.value = true
+            _onlineTutorsError.value = null
+            val res = onlineGroundingService.searchVerifiedOnlineTutors(
+                query = query,
+                centerLat = tf.clientLat,
+                centerLng = tf.clientLng,
+                centerLabel = tf.clientLabel
+            )
+            _onlineTutorsLoading.value = false
+            res.onSuccess { discovered ->
+                if (discovered.isNotEmpty()) {
+                    _discoveredOnlineTutors.update { existing ->
+                        (discovered + existing).distinctBy { it.id }
+                    }
+                    _uiMessages.tryEmit("Found ${discovered.size} verified tutoring providers via Google")
+                } else {
+                    _uiMessages.tryEmit("No additional tutoring providers found online for ${tf.clientLabel}")
+                }
+            }.onFailure { err ->
+                _onlineTutorsError.value = err.localizedMessage ?: "Online tutor lookup failed"
             }
         }
     }
@@ -1301,7 +1468,7 @@ class SchoolViewModel(
             return
         }
         viewModelScope.launch {
-            val res = repository.toggleFavoriteSchool(school.id, currentlyFavorite)
+            val res = repository.toggleFavoriteSchool(school, currentlyFavorite)
             res.onSuccess { nowSaved ->
                 _uiMessages.tryEmit(
                     if (nowSaved) "Saved ${school.name} to favorites"
@@ -1348,6 +1515,7 @@ class SchoolViewModel(
 
         viewModelScope.launch {
             val accumulated = StringBuilder()
+            val accumulatedLinks = linkedMapOf<String, GroundingSourceLink>()
             try {
                 val registered = (schoolsState.value as? UiState.Success)?.data.orEmpty()
                 val knownSchools = ExternalSchoolService.mergeRegisteredAndExternalSchools(
@@ -1366,14 +1534,22 @@ class SchoolViewModel(
                 val groundedPrompt = "${grounding.promptBlock}\n\nUser Question: $trimmed"
 
                 withTimeout(60_000L) {
-                    aiAdvisorService.streamChatTurn(
+                    aiAdvisorService.streamGroundedChatTurn(
                         modelOption = selectedOption,
                         previousMessages = previousHistory,
-                        groundedUserPrompt = groundedPrompt
+                        groundedUserPrompt = groundedPrompt,
+                        centerLat = grounding.centerLat,
+                        centerLng = grounding.centerLng
                     ).collect { chunk ->
-                        if (chunk.isNotEmpty()) {
-                            accumulated.append(chunk)
+                        chunk.groundingLinks.forEach { link ->
+                            accumulatedLinks.putIfAbsent(link.uri, link)
+                        }
+                        if (chunk.text.isNotEmpty()) {
+                            accumulated.append(chunk.text)
+                        }
+                        if (chunk.text.isNotEmpty() || chunk.groundingLinks.isNotEmpty()) {
                             val partial = accumulated.toString()
+                            val linksSnapshot = accumulatedLinks.values.toList()
                             _aiChatMessages.update { list ->
                                 list.map { msg ->
                                     if (msg.id == assistantMsgId) {
@@ -1381,7 +1557,8 @@ class SchoolViewModel(
                                             text = partial,
                                             groundedArea = grounding.areaLabel,
                                             groundedSchoolCount = grounding.matchedSchoolCount,
-                                            isStreaming = true
+                                            isStreaming = true,
+                                            groundingLinks = linksSnapshot
                                         )
                                     } else msg
                                 }
@@ -1394,6 +1571,7 @@ class SchoolViewModel(
                     throw IllegalStateException("Gemini returned an empty response.")
                 }
 
+                val finalLinks = accumulatedLinks.values.toList()
                 _aiChatMessages.update { list ->
                     list.map { msg ->
                         if (msg.id == assistantMsgId) {
@@ -1401,7 +1579,8 @@ class SchoolViewModel(
                                 text = accumulated.toString(),
                                 groundedArea = grounding.areaLabel,
                                 groundedSchoolCount = grounding.matchedSchoolCount,
-                                isStreaming = false
+                                isStreaming = false,
+                                groundingLinks = finalLinks
                             )
                         } else msg
                     }

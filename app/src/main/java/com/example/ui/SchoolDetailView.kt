@@ -23,7 +23,10 @@ import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SportsSoccer
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.Streetview
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -76,6 +80,7 @@ fun SchoolDetailView(
     onMessageAdmin: (School) -> Unit,
     onSubmitEnrollment: (School, String, String, String?, PaymentSubmissionDraft?) -> Unit,
     onClaimSchool: (School) -> Unit = {},
+    onSubmitExtraDetails: (School) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val firestoreSchool = (firestoreDetailState as? UiState.Success)?.data
@@ -174,13 +179,25 @@ fun SchoolDetailView(
             ) {
                 Surface(
                     shape = MaterialTheme.shapes.small,
-                    color = if (isRegistered) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.tertiaryContainer
+                    color = when {
+                        isRegistered -> MaterialTheme.colorScheme.primaryContainer
+                        school.isVerifiedOnline() -> StatusPresentGreen.copy(alpha = 0.16f)
+                        else -> MaterialTheme.colorScheme.tertiaryContainer
+                    }
                 ) {
                     Text(
-                        text = if (isRegistered) "#${school.districtRank} District" else "Map Listing",
+                        text = when {
+                            isRegistered -> "#${school.districtRank} District"
+                            school.isVerifiedOnline() -> "Verified Online"
+                            else -> "Online Listing"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isRegistered) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
+                        color = when {
+                            isRegistered -> MaterialTheme.colorScheme.onPrimaryContainer
+                            school.isVerifiedOnline() -> StatusPresentGreen
+                            else -> MaterialTheme.colorScheme.onTertiaryContainer
+                        },
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
@@ -239,15 +256,20 @@ fun SchoolDetailView(
             }
         }
 
-        // Verification, Website & Admissions Contact Card
+        // Verification, Online Citations & Admissions Contact Card
+        val detailCitations = remember(school.sourceCitations, school.googleMapsUrl, school.websiteUrl) {
+            school.parsedCitations()
+        }
         Surface(
             shape = MaterialTheme.shapes.medium,
-            color = if (school.verificationStatus == "VERIFIED") {
+            color = if (school.isVerifiedOnline()) {
                 StatusPresentGreen.copy(alpha = 0.12f)
             } else {
                 MaterialTheme.colorScheme.surfaceContainerHigh
             },
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("detail_verification_card")
         ) {
             Column(
                 modifier = Modifier.padding(12.dp),
@@ -258,9 +280,9 @@ fun SchoolDetailView(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(
-                        imageVector = if (school.verificationStatus == "VERIFIED") Icons.Filled.Verified else Icons.Filled.CheckCircle,
+                        imageVector = if (school.isVerifiedOnline()) Icons.Filled.Verified else Icons.Filled.CheckCircle,
                         contentDescription = null,
-                        tint = if (school.verificationStatus == "VERIFIED") StatusPresentGreen else MaterialTheme.colorScheme.primary,
+                        tint = if (school.isVerifiedOnline()) StatusPresentGreen else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -269,10 +291,15 @@ fun SchoolDetailView(
                         fontWeight = FontWeight.Bold
                     )
                 }
-                if (!school.verificationSource.isNullOrBlank()) {
+                Text(
+                    text = "Source: ${school.primarySourceSummary()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (!school.googleMapsPlaceRef.isNullOrBlank()) {
                     Text(
-                        text = school.verificationSource,
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "Google Maps Place Ref: ${school.googleMapsPlaceRef}",
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -281,6 +308,20 @@ fun SchoolDetailView(
                         text = "Managed by: ${school.adminName}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (!school.boardingOption.isNullOrBlank() && school.boardingOption != "Not Specified") {
+                    Text(
+                        text = "Boarding / Day: ${school.boardingOption}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (!school.admissionWindow.isNullOrBlank()) {
+                    Text(
+                        text = "Admission Window: ${school.admissionWindow}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = StatusPresentGreen
                     )
                 }
                 if (!school.contactPhone.isNullOrBlank()) {
@@ -303,6 +344,56 @@ fun SchoolDetailView(
                         Icon(Icons.Filled.Language, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.size(6.dp))
                         Text(school.websiteUrl)
+                    }
+                }
+                if (detailCitations.isNotEmpty()) {
+                    Text(
+                        text = "Verified Online Sources & Citations (${detailCitations.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        detailCitations.forEachIndexed { idx, link ->
+                            AssistChip(
+                                onClick = { runCatching { uriHandler.openUri(link.uri) } },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (link.sourceType == "Google Maps") Icons.Filled.Map else Icons.Filled.Public,
+                                        contentDescription = "Open ${link.sourceType} citation",
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                },
+                                label = { Text("${link.sourceType}: ${link.title}") },
+                                modifier = Modifier.testTag("detail_citation_chip_$idx")
+                            )
+                        }
+                    }
+                }
+                if (!school.extraNotes.isNullOrBlank()) {
+                    Text(
+                        text = "Extra Notes: ${school.extraNotes}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                if (!school.lastEnrichedByName.isNullOrBlank()) {
+                    Text(
+                        text = "Last enriched by: ${school.lastEnrichedByName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = StatusPresentGreen
+                    )
+                }
+                if (school.photoUrls.isNotEmpty()) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        school.photoUrls.forEachIndexed { idx, url ->
+                            AssistChip(
+                                onClick = { runCatching { uriHandler.openUri(url) } },
+                                label = { Text("Photo ${idx + 1}") }
+                            )
+                        }
                     }
                 }
             }
@@ -656,35 +747,59 @@ fun SchoolDetailView(
 
         HorizontalDivider()
 
-        // Claim or Message / Apply Action Row
+        // Immediate Enrollment Inquiry + Optional Enrichment / Claim Actions (No Registration Gate)
         if (!isRegistered) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "This institution exists at these coordinates in public map directories, but has not been claimed on Skolquik yet. Claiming preserves its geolocation and publishes full courses and program details to Firestore.",
+                    text = "Verified from online sources and ready to bookmark, compare, or submit an enrollment inquiry now. Schools or parents can also optionally enrich tuition brackets, admission windows, boarding options, or photos.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.padding(12.dp)
                 )
             }
             Button(
-                onClick = { onClaimSchool(school) },
+                onClick = { showEnrollDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 20.dp)
                     .height(50.dp)
-                    .testTag("detail_claim_school_button")
+                    .testTag("detail_apply_enroll_button")
             ) {
-                Text("Claim & Add School Details")
+                Text("Submit Enrollment Inquiry")
             }
-        } else {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onSubmitExtraDetails(school) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("detail_submit_details_button")
+                ) {
+                    Icon(Icons.Filled.EditNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(6.dp))
+                    Text("Submit More Details")
+                }
+                OutlinedButton(
+                    onClick = { onClaimSchool(school) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("detail_claim_school_button")
+                ) {
+                    Text("Claim Profile")
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 OutlinedButton(
@@ -708,6 +823,18 @@ fun SchoolDetailView(
                 ) {
                     Text(if (school.admissionsOpen) "Apply / Enroll" else "Admissions Closed")
                 }
+            }
+            OutlinedButton(
+                onClick = { onSubmitExtraDetails(school) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp)
+                    .height(48.dp)
+                    .testTag("detail_submit_details_button")
+            ) {
+                Icon(Icons.Filled.EditNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Submit More Details")
             }
         }
     }
@@ -755,7 +882,8 @@ private fun EnrollmentApplyDialog(
         }
     }
 
-    if (showCheckout) {
+    val isRegistered = school.hasPlatformAdmin()
+    if (showCheckout && isRegistered) {
         PaymentCheckoutDialog(
             title = "Application Fee Checkout",
             subtitle = "Enrollment Application • $studentName ($gradeApplying)",
@@ -776,7 +904,7 @@ private fun EnrollmentApplyDialog(
     } else {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Apply to ${school.name}") },
+            title = { Text(if (isRegistered) "Apply to ${school.name}" else "Enrollment Inquiry • ${school.name}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
@@ -801,7 +929,11 @@ private fun EnrollmentApplyDialog(
                         modifier = Modifier.fillMaxWidth()
                     )
                     Text(
-                        text = "Optional application processing fee: ${formatCurrencyAmount(appFeeAmount, school.feeCurrency)}",
+                        text = if (isRegistered) {
+                            "Optional application processing fee: ${formatCurrencyAmount(appFeeAmount, school.feeCurrency)}"
+                        } else {
+                            "Your enrollment inquiry is saved to your Skolquik portal immediately. When the school's admin joins Skolquik, they can respond directly."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -809,20 +941,25 @@ private fun EnrollmentApplyDialog(
             },
             confirmButton = {
                 Button(
-                    onClick = { showCheckout = true },
+                    onClick = {
+                        if (isRegistered) showCheckout = true
+                        else onSubmit(studentName, gradeApplying, notes.ifBlank { null }, null)
+                    },
                     enabled = studentName.isNotBlank() && gradeApplying.isNotBlank(),
                     modifier = Modifier.testTag("enroll_submit_button")
                 ) {
-                    Text("Continue to Application Fee")
+                    Text(if (isRegistered) "Continue to Application Fee" else "Submit Inquiry")
                 }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
-                        onClick = { onSubmit(studentName, gradeApplying, notes.ifBlank { null }, null) },
-                        enabled = studentName.isNotBlank() && gradeApplying.isNotBlank()
-                    ) {
-                        Text("Submit Free")
+                    if (isRegistered) {
+                        TextButton(
+                            onClick = { onSubmit(studentName, gradeApplying, notes.ifBlank { null }, null) },
+                            enabled = studentName.isNotBlank() && gradeApplying.isNotBlank()
+                        ) {
+                            Text("Submit Free")
+                        }
                     }
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                 }

@@ -10,20 +10,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.data.Announcement
 import com.example.data.FaithFilter
@@ -299,7 +308,8 @@ fun SchoolDetailBottomSheet(
     onDismiss: () -> Unit,
     onMessageAdmin: (School) -> Unit,
     onSubmitEnrollment: (School, String, String, String?, PaymentSubmissionDraft?) -> Unit,
-    onClaimSchool: (School) -> Unit = {}
+    onClaimSchool: (School) -> Unit = {},
+    onSubmitExtraDetails: (School) -> Unit = {}
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         SchoolDetailView(
@@ -310,7 +320,224 @@ fun SchoolDetailBottomSheet(
             onToggleFavorite = onToggleFavorite,
             onMessageAdmin = onMessageAdmin,
             onSubmitEnrollment = onSubmitEnrollment,
-            onClaimSchool = onClaimSchool
+            onClaimSchool = onClaimSchool,
+            onSubmitExtraDetails = onSubmitExtraDetails
         )
     }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SubmitSchoolDetailsDialog(
+    school: School,
+    onDismiss: () -> Unit,
+    onSubmit: (
+        feeMin: Long,
+        feeMax: Long,
+        feeCurrency: String,
+        feePeriod: String,
+        admissionsOpen: Boolean,
+        admissionWindow: String?,
+        boardingOption: String?,
+        photoUrls: List<String>,
+        extraNotes: String?,
+        coursesOffered: List<String>,
+        gradeLevels: List<String>,
+        websiteUrl: String?,
+        contactPhone: String?
+    ) -> Unit
+) {
+    var feeMinText by remember(school.id) { mutableStateOf(if (school.feeMin > 0L) school.feeMin.toString() else "") }
+    var feeMaxText by remember(school.id) { mutableStateOf(if (school.feeMax > 0L) school.feeMax.toString() else "") }
+    var feeCurrency by remember(school.id) { mutableStateOf(school.feeCurrency.ifBlank { "NGN" }) }
+    var feePeriod by remember(school.id) { mutableStateOf(school.feePeriod.ifBlank { "Per Term" }) }
+    var admissionsOpen by remember(school.id) { mutableStateOf(school.admissionsOpen) }
+    var admissionWindow by remember(school.id) { mutableStateOf(school.admissionWindow.orEmpty()) }
+    var boardingOption by remember(school.id) { mutableStateOf(school.boardingOption ?: "Not Specified") }
+    var photoUrlsText by remember(school.id) { mutableStateOf(school.photoUrls.joinToString("\n")) }
+    var coursesText by remember(school.id) { mutableStateOf(school.coursesOffered.joinToString(", ")) }
+    var websiteUrl by remember(school.id) { mutableStateOf(school.websiteUrl.orEmpty()) }
+    var contactPhone by remember(school.id) { mutableStateOf(school.contactPhone.orEmpty()) }
+    var extraNotes by remember(school.id) { mutableStateOf(school.extraNotes.orEmpty()) }
+    var selectedGrades by remember(school.id) { mutableStateOf(school.gradeLevels.toSet()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Submit Extra Details") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .testTag("submit_details_dialog"),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Help families compare ${school.name}. Extra details save to the cloud without locking or blocking the listing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = feeMinText,
+                        onValueChange = { v -> feeMinText = v.filter { it.isDigit() } },
+                        label = { Text("Min Tuition") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).testTag("submit_details_fee_min")
+                    )
+                    OutlinedTextField(
+                        value = feeMaxText,
+                        onValueChange = { v -> feeMaxText = v.filter { it.isDigit() } },
+                        label = { Text("Max Tuition") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f).testTag("submit_details_fee_max")
+                    )
+                }
+
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SchoolConstants.FEE_CURRENCIES.forEach { curr ->
+                        FilterChip(
+                            selected = feeCurrency == curr,
+                            onClick = { feeCurrency = curr },
+                            label = { Text(curr) }
+                        )
+                    }
+                    SchoolConstants.FEE_PERIODS.forEach { period ->
+                        FilterChip(
+                            selected = feePeriod == period,
+                            onClick = { feePeriod = period },
+                            label = { Text(period) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Admissions Currently Open", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = admissionsOpen, onCheckedChange = { admissionsOpen = it })
+                }
+
+                OutlinedTextField(
+                    value = admissionWindow,
+                    onValueChange = { admissionWindow = it },
+                    label = { Text("Admission Window (e.g. Jan–Apr 2026)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("submit_details_admission_window")
+                )
+
+                Text("Boarding Option", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SchoolConstants.BOARDING_OPTIONS.forEach { opt ->
+                        FilterChip(
+                            selected = boardingOption == opt,
+                            onClick = { boardingOption = opt },
+                            label = { Text(opt) }
+                        )
+                    }
+                }
+
+                Text("Programmes / Grade Levels", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    SchoolConstants.ALL_PROGRAMMES.forEach { grade ->
+                        val active = grade in selectedGrades
+                        FilterChip(
+                            selected = active,
+                            onClick = {
+                                selectedGrades = if (active) selectedGrades - grade else selectedGrades + grade
+                            },
+                            label = { Text(grade) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = coursesText,
+                    onValueChange = { coursesText = it },
+                    label = { Text("Courses / Curriculum Highlights (comma separated)") },
+                    maxLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = contactPhone,
+                        onValueChange = { contactPhone = it },
+                        label = { Text("Phone") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = websiteUrl,
+                        onValueChange = { websiteUrl = it },
+                        label = { Text("Website") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                OutlinedTextField(
+                    value = photoUrlsText,
+                    onValueChange = { photoUrlsText = it },
+                    label = { Text("Campus Photo URLs (https://..., one per line)") },
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = extraNotes,
+                    onValueChange = { extraNotes = it },
+                    label = { Text("Additional Parent / School Notes") },
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val parsedMin = feeMinText.toLongOrNull() ?: 0L
+                    val parsedMax = (feeMaxText.toLongOrNull() ?: parsedMin).coerceAtLeast(parsedMin)
+                    val photos = photoUrlsText
+                        .split('\n', ',')
+                        .map { it.trim() }
+                        .filter { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
+                        .distinct()
+                        .take(8)
+                    val courses = coursesText
+                        .split(',')
+                        .map { it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .take(25)
+                    onSubmit(
+                        parsedMin,
+                        parsedMax,
+                        feeCurrency,
+                        feePeriod,
+                        admissionsOpen,
+                        admissionWindow.ifBlank { null },
+                        boardingOption,
+                        photos,
+                        extraNotes.ifBlank { null },
+                        courses,
+                        selectedGrades.toList(),
+                        websiteUrl.ifBlank { null },
+                        contactPhone.ifBlank { null }
+                    )
+                },
+                modifier = Modifier.testTag("submit_details_save_button")
+            ) {
+                Text("Save Extra Details")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

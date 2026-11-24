@@ -364,7 +364,7 @@ internal fun buildLeafletHtmlDocument(
                       fillColor: s.color || primary,
                       fillOpacity: 0.95
                     });
-                    var actionLabel = s.registered ? 'Open Details' : 'Claim School';
+                    var actionLabel = s.registered ? 'Open Details' : 'View & Act';
                     var popupEl = document.createElement('div');
                     popupEl.innerHTML =
                       '<div class="sc-popup-title">' + escapeHtml(s.name) + '</div>' +
@@ -433,6 +433,7 @@ fun InternetStreetMapView(
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var pageLoaded by remember { mutableStateOf(false) }
+    var webViewUnavailable by remember { mutableStateOf(false) }
 
     val payloadJson = remember(filter, filteredSchools, primaryHex) {
         buildLeafletMapPayloadJson(
@@ -441,25 +442,32 @@ fun InternetStreetMapView(
             primaryHex = primaryHex
         )
     }
+    val latestPayloadJson by rememberUpdatedState(payloadJson)
 
     LaunchedEffect(pageLoaded, payloadJson) {
         if (pageLoaded) {
-            webViewRef?.evaluateJavascript("window.updateSchoolCompassMap($payloadJson);", null)
+            runCatching {
+                webViewRef?.evaluateJavascript("window.updateSchoolCompassMap($payloadJson);", null)
+            }
         }
     }
 
     LaunchedEffect(fitNigeriaOverviewTick) {
         if (fitNigeriaOverviewTick > 0 && pageLoaded) {
-            webViewRef?.evaluateJavascript("window.fitNigeriaOverview();", null)
+            runCatching {
+                webViewRef?.evaluateJavascript("window.fitNigeriaOverview();", null)
+            }
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            webViewRef?.let { wv ->
-                wv.stopLoading()
-                wv.removeJavascriptInterface("SchoolCompassBridge")
-                wv.destroy()
+            runCatching {
+                webViewRef?.let { wv ->
+                    wv.stopLoading()
+                    wv.removeJavascriptInterface("SchoolCompassBridge")
+                    wv.destroy()
+                }
             }
             webViewRef = null
         }
@@ -471,87 +479,115 @@ fun InternetStreetMapView(
             .background(surfaceColor)
             .testTag("internet_map_view")
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    setBackgroundColor(AndroidColor.parseColor("#F5EEFF"))
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        setSupportZoom(true)
-                        builtInZoomControls = false
-                        displayZoomControls = false
-                        userAgentString = "SchoolCompassAndroid/1.0 (LeafletOSM)"
-                    }
-
-                    // Prevent parent LazyColumn from stealing vertical map pan gestures
-                    setOnTouchListener { v, event ->
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                                v.parent?.requestDisallowInterceptTouchEvent(true)
+        if (!webViewUnavailable) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    try {
+                        WebView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setBackgroundColor(AndroidColor.parseColor("#F5EEFF"))
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                allowFileAccess = false
+                                allowContentAccess = false
+                                setSupportZoom(true)
+                                builtInZoomControls = false
+                                displayZoomControls = false
+                                userAgentString = "SchoolCompassAndroid/1.0 (LeafletOSM)"
                             }
-                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                                v.parent?.requestDisallowInterceptTouchEvent(false)
+
+                            // Prevent parent LazyColumn from stealing vertical map pan gestures
+                            setOnTouchListener { v, event ->
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                                    }
+                                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                                    }
+                                }
+                                false
                             }
-                        }
-                        false
-                    }
 
-                    val bridge = LeafletBridge(
-                        mainHandler = mainHandler,
-                        onPinLocation = { lat, lng -> latestOnPin(lat, lng) },
-                        onSelectSchoolId = { id ->
-                            latestSchools.firstOrNull { it.school.id == id }?.let { match ->
-                                latestOnSelectSchool(match)
+                            val bridge = LeafletBridge(
+                                mainHandler = mainHandler,
+                                onPinLocation = { lat, lng -> latestOnPin(lat, lng) },
+                                onSelectSchoolId = { id ->
+                                    latestSchools.firstOrNull { it.school.id == id }?.let { match ->
+                                        latestOnSelectSchool(match)
+                                    }
+                                }
+                            )
+                            addJavascriptInterface(bridge, "SchoolCompassBridge")
+
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    pageLoaded = true
+                                    runCatching {
+                                        view?.evaluateJavascript("window.updateSchoolCompassMap($latestPayloadJson);", null)
+                                    }
+                                }
+
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    error: WebResourceError?
+                                ) {
+                                    super.onReceivedError(view, request, error)
+                                }
                             }
-                        }
-                    )
-                    addJavascriptInterface(bridge, "SchoolCompassBridge")
 
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            pageLoaded = true
-                            view?.evaluateJavascript("window.updateSchoolCompassMap($payloadJson);", null)
+                            val initialZoom = zoomForRadiusKm(filter.radiusKm).roundToInt().coerceIn(6, 17)
+                            val html = buildLeafletHtmlDocument(
+                                initialLat = filter.centerLat,
+                                initialLng = filter.centerLng,
+                                initialZoom = initialZoom,
+                                initialLabel = filter.centerLabel,
+                                primaryHex = primaryHex,
+                                lockToNigeria = filter.lockToNigeria
+                            )
+                            loadDataWithBaseURL(
+                                "https://schoolcompass.app/",
+                                html,
+                                "text/html",
+                                "UTF-8",
+                                null
+                            )
+                            webViewRef = this
                         }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: WebResourceError?
-                        ) {
-                            super.onReceivedError(view, request, error)
-                        }
+                    } catch (_: Throwable) {
+                        webViewUnavailable = true
+                        android.view.View(ctx)
                     }
-
-                    val initialZoom = zoomForRadiusKm(filter.radiusKm).roundToInt().coerceIn(6, 17)
-                    val html = buildLeafletHtmlDocument(
-                        initialLat = filter.centerLat,
-                        initialLng = filter.centerLng,
-                        initialZoom = initialZoom,
-                        initialLabel = filter.centerLabel,
-                        primaryHex = primaryHex,
-                        lockToNigeria = filter.lockToNigeria
-                    )
-                    loadDataWithBaseURL(
-                        "https://schoolcompass.app/",
-                        html,
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
-                    webViewRef = this
                 }
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "${filter.centerLabel} (${String.format(Locale.US, "%.3f", filter.centerLat)}, ${String.format(Locale.US, "%.3f", filter.centerLng)})",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "${filteredSchools.size} schools matched within ${filter.radiusKm} km",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        )
+        }
 
         // Zoom + / - Controls (bottom right)
         Column(
@@ -561,7 +597,7 @@ fun InternetStreetMapView(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             FilledTonalIconButton(
-                onClick = { webViewRef?.evaluateJavascript("window.zoomMap(1);", null) },
+                onClick = { runCatching { webViewRef?.evaluateJavascript("window.zoomMap(1);", null) } },
                 modifier = Modifier
                     .size(48.dp)
                     .testTag("map_zoom_in")
@@ -569,7 +605,7 @@ fun InternetStreetMapView(
                 Icon(Icons.Filled.Add, contentDescription = "Zoom in")
             }
             FilledTonalIconButton(
-                onClick = { webViewRef?.evaluateJavascript("window.zoomMap(-1);", null) },
+                onClick = { runCatching { webViewRef?.evaluateJavascript("window.zoomMap(-1);", null) } },
                 modifier = Modifier
                     .size(48.dp)
                     .testTag("map_zoom_out")

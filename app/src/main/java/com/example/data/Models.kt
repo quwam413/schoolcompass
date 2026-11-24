@@ -22,6 +22,7 @@ object SchoolConstants {
     )
 
     val STUDENT_MIX_OPTIONS = listOf("Mixed", "Boys Only", "Girls Only")
+    val BOARDING_OPTIONS = listOf("Day", "Boarding", "Day & Boarding", "Not Specified")
     val FEE_CURRENCIES = listOf("NGN", "USD", "GBP", "EUR")
     val FEE_PERIODS = listOf("Per Term", "Per Year")
     val TUITION_TIERS = listOf("Public / Free", "$", "$$", "$$$")
@@ -84,7 +85,7 @@ object SchoolConstants {
 
     val TUTOR_CURRICULUM_TRACKS = listOf("Cambridge", "Nigerian", "Cambridge & Nigerian")
     val TUTOR_SEX_OPTIONS = listOf("Female", "Male")
-    val MEETING_PLATFORMS = listOf("Google Meet", "Zoom", "Microsoft Teams", "SchoolCompass Live")
+    val MEETING_PLATFORMS = listOf("Google Meet", "Zoom", "Microsoft Teams", "Skolquik Live")
 
     val CAMBRIDGE_SUBJECTS = listOf(
         "Cambridge IGCSE Mathematics",
@@ -225,15 +226,99 @@ data class School(
     val websiteUrl: String? = null,
     val verificationStatus: String = "UNVERIFIED",
     val verificationSource: String? = null,
+    val sourceCitations: List<String> = emptyList(),
+    val googleMapsPlaceRef: String? = null,
+    val googleMapsUrl: String? = null,
+    val admissionWindow: String? = null,
+    val boardingOption: String? = null,
+    val photoUrls: List<String> = emptyList(),
+    val extraNotes: String? = null,
+    val lastEnrichedByName: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun hasPlatformAdmin(): Boolean = adminUid.isNotBlank()
 
+    fun isVerifiedOnline(): Boolean =
+        verificationStatus in listOf("VERIFIED", "VERIFIED_ONLINE", "INTERNET_MATCHED")
+
     fun verificationBadgeLabel(): String = when (verificationStatus) {
-        "VERIFIED" -> "Internet Verified"
-        "INTERNET_MATCHED" -> "Map Directory Match"
+        "VERIFIED" -> "Verified (Admin & Online)"
+        "VERIFIED_ONLINE" -> "Verified Online"
+        "INTERNET_MATCHED" -> "Verified Online"
         else -> "Pending Verification"
+    }
+
+    fun parsedCitations(): List<GroundingSourceLink> {
+        val list = mutableListOf<GroundingSourceLink>()
+        val seenUris = mutableSetOf<String>()
+        sourceCitations.forEach { raw ->
+            val parts = raw.split(" | ", limit = 2)
+            val uri = if (parts.size == 2) parts[1].trim() else raw.trim()
+            val titleRaw = if (parts.size == 2) parts[0].trim() else uri
+            val isMaps = titleRaw.startsWith("[Google Maps]", ignoreCase = true) ||
+                uri.contains("google.com/maps", ignoreCase = true) ||
+                uri.contains("maps.google", ignoreCase = true)
+            val sourceType = if (isMaps) "Google Maps" else "Google Search"
+            val cleanTitle = titleRaw
+                .removePrefix("[Google Maps]")
+                .removePrefix("[Google Search]")
+                .removePrefix("[Web]")
+                .trim()
+                .ifEmpty { if (isMaps) "Google Maps Place" else "Online Source" }
+            if ((uri.startsWith("http://", ignoreCase = true) || uri.startsWith("https://", ignoreCase = true)) &&
+                seenUris.add(uri)
+            ) {
+                list.add(
+                    GroundingSourceLink(
+                        title = cleanTitle.take(80),
+                        uri = uri.take(300),
+                        sourceType = sourceType,
+                        placeId = if (isMaps) googleMapsPlaceRef else null
+                    )
+                )
+            }
+        }
+        val mapsLink = googleMapsUrl?.trim()
+        if (!mapsLink.isNullOrBlank() &&
+            (mapsLink.startsWith("http://", ignoreCase = true) || mapsLink.startsWith("https://", ignoreCase = true)) &&
+            seenUris.add(mapsLink)
+        ) {
+            list.add(
+                GroundingSourceLink(
+                    title = googleMapsPlaceRef?.let { "Google Maps ($it)" } ?: "Google Maps Listing",
+                    uri = mapsLink.take(300),
+                    sourceType = "Google Maps",
+                    placeId = googleMapsPlaceRef
+                )
+            )
+        }
+        val site = websiteUrl?.trim()
+        if (!site.isNullOrBlank() &&
+            (site.startsWith("http://", ignoreCase = true) || site.startsWith("https://", ignoreCase = true)) &&
+            seenUris.add(site)
+        ) {
+            list.add(
+                GroundingSourceLink(
+                    title = "Official Website",
+                    uri = site.take(300),
+                    sourceType = "Official Site"
+                )
+            )
+        }
+        return list
+    }
+
+    fun primarySourceSummary(): String {
+        val rawSource = verificationSource?.trim().orEmpty()
+        val ref = googleMapsPlaceRef?.trim().orEmpty()
+        return when {
+            rawSource.isNotBlank() && ref.isNotBlank() -> "$rawSource • Maps Ref"
+            rawSource.isNotBlank() -> rawSource
+            ref.isNotBlank() -> "Google Maps ($ref)"
+            isVerifiedOnline() -> "Google Search & Maps Grounding"
+            else -> "Pending verification"
+        }
     }
 
     fun formattedFeeRange(): String {
@@ -248,6 +333,15 @@ data class School(
         }
         return "$symbol${formatCompactAmount(feeMin)} – $symbol${formatCompactAmount(feeMax)} / ${if (feePeriod == "Per Term") "term" else "yr"}"
     }
+}
+
+data class GroundingSourceLink(
+    val title: String,
+    val uri: String,
+    val sourceType: String,
+    val placeId: String? = null
+) {
+    fun toCitationString(): String = "[$sourceType] ${title.trim().take(80)} | ${uri.trim().take(240)}"
 }
 
 fun formatCompactAmount(amount: Long): String = when {
@@ -500,10 +594,18 @@ data class ProgressiveTutor(
     val longitude: Double = 3.4737,
     val rating: Double = 4.8,
     val onlineActive: Boolean = true,
+    val verificationStatus: String = "REGISTERED",
+    val verificationSource: String? = null,
+    val websiteUrl: String? = null,
+    val googleMapsUrl: String? = null,
+    val contactPhone: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
+    fun isVerifiedOnlineOnly(): Boolean = teacherUid.isBlank() || verificationStatus == "VERIFIED_ONLINE"
+
     fun formattedHourlyRate(): String {
+        if (hourlyRate <= 0L) return "Contact for rates"
         val symbol = when (currency) {
             "NGN" -> "₦"
             "USD" -> "$"
@@ -604,6 +706,7 @@ data class AiAdvisorMessage(
     val groundedArea: String? = null,
     val groundedSchoolCount: Int = 0,
     val modelLabel: String? = null,
-    val isStreaming: Boolean = false
+    val isStreaming: Boolean = false,
+    val groundingLinks: List<GroundingSourceLink> = emptyList()
 )
 

@@ -260,13 +260,13 @@ fun AdminHubScreen(
                                 ) {
                                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                                     Text(
-                                        text = "Nearby Map Schools Not Registered Yet (${unclaimedExternalSchools.size})",
+                                        text = "Verified Online Schools Nearby (${unclaimedExternalSchools.size})",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }
                                 Text(
-                                    text = "Tap an already-geolocated school below to claim it and add curriculum, fee ranges, and sports without creating a duplicate listing:",
+                                    text = "These schools are already visible and searchable online. Tap one below if you are the school's administrator and want to claim & enrich its profile:",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
@@ -344,12 +344,12 @@ fun AdminHubScreen(
                                 ) {
                                     AttributeBadge(
                                         text = school.verificationBadgeLabel(),
-                                        containerColor = if (school.verificationStatus == "VERIFIED") {
+                                        containerColor = if (school.isVerifiedOnline()) {
                                             StatusPresentGreen.copy(alpha = 0.16f)
                                         } else {
                                             MaterialTheme.colorScheme.surfaceVariant
                                         },
-                                        contentColor = if (school.verificationStatus == "VERIFIED") {
+                                        contentColor = if (school.isVerifiedOnline()) {
                                             StatusPresentGreen
                                         } else {
                                             MaterialTheme.colorScheme.onSurfaceVariant

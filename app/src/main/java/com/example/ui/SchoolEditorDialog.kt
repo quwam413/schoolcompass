@@ -408,9 +408,10 @@ fun SchoolEditorSheet(
             )
 
             // Internet Verification Check Panel
+            val isVerifiedStatus = verificationStatus in listOf("VERIFIED", "VERIFIED_ONLINE", "INTERNET_MATCHED")
             Surface(
                 shape = MaterialTheme.shapes.medium,
-                color = if (verificationStatus == "VERIFIED") {
+                color = if (isVerifiedStatus) {
                     StatusPresentGreen.copy(alpha = 0.12f)
                 } else {
                     MaterialTheme.colorScheme.surfaceContainerLow
@@ -433,13 +434,13 @@ fun SchoolEditorSheet(
                             Icon(
                                 imageVector = Icons.Filled.Verified,
                                 contentDescription = null,
-                                tint = if (verificationStatus == "VERIFIED") StatusPresentGreen else MaterialTheme.colorScheme.primary,
+                                tint = if (isVerifiedStatus) StatusPresentGreen else MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
                                 text = when (verificationStatus) {
-                                    "VERIFIED" -> "Internet Verified"
-                                    "INTERNET_MATCHED" -> "Map Directory Matched"
+                                    "VERIFIED" -> "Verified (Admin & Online)"
+                                    "VERIFIED_ONLINE", "INTERNET_MATCHED" -> "Verified Online"
                                     else -> "Unverified"
                                 },
                                 style = MaterialTheme.typography.titleSmall,

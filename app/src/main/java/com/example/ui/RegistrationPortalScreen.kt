@@ -78,7 +78,9 @@ fun RegistrationPortalScreen(
     onCancel: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val fusedClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
+    val fusedClient = remember(context) {
+        runCatching { LocationServices.getFusedLocationProviderClient(context) }.getOrNull()
+    }
 
     var selectedRole by remember(existingProfile) {
         mutableStateOf(existingProfile?.role ?: "parent")
@@ -112,57 +114,78 @@ fun RegistrationPortalScreen(
     fun fetchGps(applyAddressLabel: Boolean = true) {
         isLocatingGps = true
         val cts = CancellationTokenSource()
-        fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
-            .addOnSuccessListener { currentLoc ->
-                if (currentLoc != null) {
-                    isLocatingGps = false
-                    homeLat = currentLoc.latitude
-                    homeLng = currentLoc.longitude
-                    if (applyAddressLabel) {
-                        homeAddress = "Current GPS (${String.format("%.3f", currentLoc.latitude)}, ${String.format("%.3f", currentLoc.longitude)})"
-                    }
-                    locationMessage = "Device GPS captured (${String.format("%.4f", currentLoc.latitude)}, ${String.format("%.4f", currentLoc.longitude)})"
-                } else {
-                    fusedClient.lastLocation
-                        .addOnSuccessListener { lastLoc ->
-                            isLocatingGps = false
-                            if (lastLoc != null) {
-                                homeLat = lastLoc.latitude
-                                homeLng = lastLoc.longitude
-                                if (applyAddressLabel) {
-                                    homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
-                                }
-                                locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
-                            } else {
-                                locationMessage = "GPS coordinates unavailable; pick a neighborhood below"
-                            }
-                        }
-                        .addOnFailureListener {
-                            isLocatingGps = false
-                            locationMessage = "Unable to read GPS; pick a neighborhood below"
-                        }
-                }
-            }
-            .addOnFailureListener {
-                fusedClient.lastLocation
-                    .addOnSuccessListener { lastLoc ->
+        val client = fusedClient
+        if (client == null) {
+            isLocatingGps = false
+            locationMessage = "GPS service unavailable; pick a neighborhood below"
+            return
+        }
+        try {
+            client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+                .addOnSuccessListener { currentLoc ->
+                    if (currentLoc != null) {
                         isLocatingGps = false
-                        if (lastLoc != null) {
-                            homeLat = lastLoc.latitude
-                            homeLng = lastLoc.longitude
-                            if (applyAddressLabel) {
-                                homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
-                            }
-                            locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
-                        } else {
+                        homeLat = currentLoc.latitude
+                        homeLng = currentLoc.longitude
+                        if (applyAddressLabel) {
+                            homeAddress = "Current GPS (${String.format("%.3f", currentLoc.latitude)}, ${String.format("%.3f", currentLoc.longitude)})"
+                        }
+                        locationMessage = "Device GPS captured (${String.format("%.4f", currentLoc.latitude)}, ${String.format("%.4f", currentLoc.longitude)})"
+                    } else {
+                        try {
+                            client.lastLocation
+                                .addOnSuccessListener { lastLoc ->
+                                    isLocatingGps = false
+                                    if (lastLoc != null) {
+                                        homeLat = lastLoc.latitude
+                                        homeLng = lastLoc.longitude
+                                        if (applyAddressLabel) {
+                                            homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
+                                        }
+                                        locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
+                                    } else {
+                                        locationMessage = "GPS coordinates unavailable; pick a neighborhood below"
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    isLocatingGps = false
+                                    locationMessage = "Unable to read GPS; pick a neighborhood below"
+                                }
+                        } catch (_: Exception) {
+                            isLocatingGps = false
                             locationMessage = "Unable to read GPS; pick a neighborhood below"
                         }
                     }
-                    .addOnFailureListener {
+                }
+                .addOnFailureListener {
+                    try {
+                        client.lastLocation
+                            .addOnSuccessListener { lastLoc ->
+                                isLocatingGps = false
+                                if (lastLoc != null) {
+                                    homeLat = lastLoc.latitude
+                                    homeLng = lastLoc.longitude
+                                    if (applyAddressLabel) {
+                                        homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
+                                    }
+                                    locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
+                                } else {
+                                    locationMessage = "Unable to read GPS; pick a neighborhood below"
+                                }
+                            }
+                            .addOnFailureListener {
+                                isLocatingGps = false
+                                locationMessage = "Unable to read GPS; pick a neighborhood below"
+                            }
+                    } catch (_: Exception) {
                         isLocatingGps = false
                         locationMessage = "Unable to read GPS; pick a neighborhood below"
                     }
-            }
+                }
+        } catch (_: Exception) {
+            isLocatingGps = false
+            locationMessage = "Unable to read GPS; pick a neighborhood below"
+        }
     }
 
     val locationLauncher = rememberLauncherForActivityResult(
@@ -182,12 +205,14 @@ fun RegistrationPortalScreen(
             fetchGps(applyAddressLabel = existingProfile == null)
         } else if (!hasPromptedLocation) {
             hasPromptedLocation = true
-            locationLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION
+            runCatching {
+                locationLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -325,12 +350,16 @@ fun RegistrationPortalScreen(
                             if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
                                 fetchGps(applyAddressLabel = true)
                             } else {
-                                locationLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                        Manifest.permission.ACCESS_FINE_LOCATION
+                                runCatching {
+                                    locationLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                                            Manifest.permission.ACCESS_FINE_LOCATION
+                                        )
                                     )
-                                )
+                                }.onFailure {
+                                    locationMessage = "Location prompt unavailable; choose a neighborhood preset below"
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxWidth().testTag("registration_gps_button")

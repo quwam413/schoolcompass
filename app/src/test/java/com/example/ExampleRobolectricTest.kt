@@ -4,11 +4,17 @@ import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.AiAdvisorModelOption
 import com.example.data.Announcement
@@ -21,10 +27,14 @@ import com.example.data.calculateDistanceKm
 import com.example.ui.MercatorProjection
 import com.example.ui.SchoolDetailView
 import com.example.ui.UiState
-import com.example.ui.theme.DeepPurplePrimary
-import com.example.ui.theme.LightPurplePrimaryContainer
+import com.example.ui.theme.HighlightHue
+import com.example.ui.theme.PureWhiteBackground
 import com.example.ui.theme.SchoolCompassTheme
+import com.example.ui.theme.SolarThemeCalculator
+import com.example.ui.theme.ThemeAppearanceMode
+import com.example.ui.theme.ThemeSettings
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -413,23 +423,43 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `purple theme exposes deep and light purple tokens and balanced ai model id`() {
+    fun `minimalist white theme and customizable highlight hues preserve white canvas and model ids`() {
+        var capturedBackground = androidx.compose.ui.graphics.Color.Unspecified
         var capturedPrimary = androidx.compose.ui.graphics.Color.Unspecified
-        var capturedPrimaryContainer = androidx.compose.ui.graphics.Color.Unspecified
 
         composeTestRule.setContent {
-            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+            SchoolCompassTheme(
+                darkTheme = false,
+                highlightHue = HighlightHue.EMERALD_MINT,
+                dynamicColor = false
+            ) {
+                capturedBackground = MaterialTheme.colorScheme.background
                 capturedPrimary = MaterialTheme.colorScheme.primary
-                capturedPrimaryContainer = MaterialTheme.colorScheme.primaryContainer
             }
         }
 
         composeTestRule.waitForIdle()
-        assertEquals(DeepPurplePrimary, capturedPrimary)
-        assertEquals(LightPurplePrimaryContainer, capturedPrimaryContainer)
+        assertEquals(PureWhiteBackground, capturedBackground)
+        assertEquals(HighlightHue.EMERALD_MINT.lightPrimary, capturedPrimary)
         assertEquals("gemini-3.8-flash", AiAdvisorModelOption.BALANCED.modelId)
         assertEquals("gemini-3.5-flash-lite", AiAdvisorModelOption.LITE.modelId)
         assertEquals("gemini-4-argon", AiAdvisorModelOption.DEEP.modelId)
+    }
+
+    @Test
+    fun `solar theme calculator switches between day and night accurately around sunrise and sunset`() {
+        val noonCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Africa/Lagos")).apply {
+            set(2026, java.util.Calendar.JUNE, 15, 12, 30, 0)
+        }
+        val midnightCal = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Africa/Lagos")).apply {
+            set(2026, java.util.Calendar.JUNE, 15, 22, 30, 0)
+        }
+        val noonSchedule = SolarThemeCalculator.calculateSchedule(6.4474, 3.4737, noonCal)
+        val nightSchedule = SolarThemeCalculator.calculateSchedule(6.4474, 3.4737, midnightCal)
+        assertFalse("Solar schedule at 12:30 should be daytime", noonSchedule.isCurrentlyNight)
+        assertTrue("Solar schedule at 22:30 should be nighttime", nightSchedule.isCurrentlyNight)
+        assertTrue(noonSchedule.sunriseMinutesFromMidnight in 300..450)
+        assertTrue(noonSchedule.sunsetMinutesFromMidnight in 1050..1200)
     }
 
     @Test
@@ -545,20 +575,21 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `discoverScreen renders without CameraUpdateFactory or scroll crash`() {
-        val sampleSchool = School(
+    fun `discoverScreen renders with pull to refresh and without CameraUpdateFactory crash`() {
+        val verifiedSchool = School(
             id = "disc_1",
-            adminUid = "admin_disc",
-            name = "Skolquik Model College",
-            address = "Ikorodu, Lagos",
-            latitude = 6.6210,
-            longitude = 3.5150
+            adminUid = "",
+            name = "Corona School Victoria Island",
+            address = "Victoria Island, Lagos",
+            latitude = 6.4281,
+            longitude = 3.4219,
+            verificationStatus = "VERIFIED_ONLINE"
         )
         composeTestRule.setContent {
             SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
                 com.example.ui.DiscoverScreen(
-                    schoolsUiState = UiState.Success(listOf(sampleSchool)),
-                    filteredSchools = listOf(SchoolWithDistance(sampleSchool, 0.8)),
+                    schoolsUiState = UiState.Success(listOf(verifiedSchool)),
+                    filteredSchools = listOf(SchoolWithDistance(verifiedSchool, 0.8)),
                     filter = com.example.data.SchoolSearchFilter(
                         centerLat = 6.6194,
                         centerLng = 3.5105,
@@ -566,16 +597,18 @@ class ExampleRobolectricTest {
                         radiusKm = 15
                     ),
                     isBusy = false,
+                    isRefreshingHome = false,
+                    onPullToRefreshHome = {},
                     onUpdateFilter = {},
                     onResetFilters = {},
                     onMessageAdmin = {},
                     onSubmitEnrollment = { _, _, _, _, _ -> },
-                    onSeedSampleSchools = {},
                     onRegisterSchoolClick = {}
                 )
             }
         }
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("discover_pull_to_refresh").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_advert_grid_4x2").assertIsDisplayed()
         composeTestRule.onNodeWithTag("discover_search_input").assertIsDisplayed()
     }
@@ -583,8 +616,466 @@ class ExampleRobolectricTest {
     @Test
     fun `mainActivity launches onCreate and renders initial content without crashing`() {
         val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java)
-        controller.setup()
-        val activity = controller.get()
-        assertTrue("MainActivity should not finish during launch", !activity.isFinishing)
+        try {
+            controller.setup()
+            val activity = controller.get()
+            assertTrue("MainActivity should not finish during launch", !activity.isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `registrationPortalScreen renders after first sign in without crashing`() {
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.RegistrationPortalScreen(
+                    existingProfile = null,
+                    defaultName = "Quam Elebute",
+                    defaultEmail = SchoolConstants.PLATFORM_ADMIN_EMAIL,
+                    isBusy = false,
+                    onSaveProfile = { _, _, _, _, _, _, _, _ -> }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Complete Your Registration").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("save_registration_button").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `adminHubScreen renders super admin oversight without crashing`() {
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.AdminHubScreen(
+                    currentUserId = "admin_super",
+                    adminName = "Quam Elebute",
+                    defaultLat = 6.4474,
+                    defaultLng = 3.4737,
+                    isPlatformAdmin = true,
+                    initialOpenOversight = true,
+                    schoolsState = UiState.Success(emptyList()),
+                    adminEnrollmentsState = UiState.Success(emptyList()),
+                    adminStudentsState = UiState.Success(emptyList()),
+                    selectedAdminStudentId = null,
+                    adminAttendanceState = UiState.Success(emptyList()),
+                    adminGradesState = UiState.Success(emptyList()),
+                    isBusy = false,
+                    onSaveSchool = { _, _ -> },
+                    onUpdateEnrollmentStatus = { _, _, _ -> },
+                    onSelectAdminStudent = {},
+                    onLogAttendance = { _, _, _, _ -> },
+                    onAddGrade = { _, _, _, _, _ -> },
+                    onPublishAnnouncement = { _, _, _, _, _ -> }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_oversight_summary_card").assertIsDisplayed()
+    }
+
+    @Test
+    fun `parseGroundedSchoolsResponse extracts verified online schools with search and maps citations`() {
+        val rawJson = """
+            ```json
+            [
+              {
+                "name": "Atlantic Hall School",
+                "address": "Poka, Epe, Lagos",
+                "latitude": 6.6012,
+                "longitude": 3.9721,
+                "institutionType": "Primary & Secondary",
+                "curriculum": "Nigerian & British",
+                "gradeLevels": ["Junior Secondary", "Senior Secondary"],
+                "coursesOffered": ["Sciences & Biotechnology", "Cambridge IGCSE"],
+                "programHighlights": "Full boarding co-educational secondary school with IGCSE and WAEC tracks.",
+                "websiteUrl": "https://atlantic-hall.net",
+                "contactPhone": "+234-800-555-0199",
+                "boardingOption": "Boarding",
+                "admissionWindow": "Jan - Apr 2026",
+                "sourceTitle": "Atlantic Hall Official Portal",
+                "sourceUrl": "https://atlantic-hall.net/admissions",
+                "googleMapsPlaceRef": "places/ChIJA12345"
+              }
+            ]
+            ```
+        """.trimIndent()
+
+        val groundingLinks = listOf(
+            com.example.data.GroundingSourceLink(
+                title = "Atlantic Hall School on Google Maps",
+                uri = "https://www.google.com/maps/place/?q=place_id:ChIJA12345",
+                sourceType = "Google Maps",
+                placeId = "places/ChIJA12345"
+            ),
+            com.example.data.GroundingSourceLink(
+                title = "Atlantic Hall Admissions Overview",
+                uri = "https://atlantic-hall.net",
+                sourceType = "Google Search"
+            )
+        )
+
+        val parsed = com.example.data.OnlineSchoolGroundingService.parseGroundedSchoolsResponse(
+            rawText = rawJson,
+            groundingLinks = groundingLinks,
+            fallbackLat = 6.4474,
+            fallbackLng = 3.4737,
+            fallbackArea = "Lagos"
+        )
+
+        assertEquals(1, parsed.size)
+        val school = parsed.first()
+        assertEquals("", school.adminUid)
+        assertEquals("gmaps_ChIJA12345", school.id)
+        assertEquals("VERIFIED_ONLINE", school.verificationStatus)
+        assertTrue(school.isVerifiedOnline())
+        assertEquals("Verified Online", school.verificationBadgeLabel())
+        assertEquals("Boarding", school.boardingOption)
+        assertEquals("Jan - Apr 2026", school.admissionWindow)
+        assertEquals("places/ChIJA12345", school.googleMapsPlaceRef)
+        assertTrue(school.parsedCitations().any { it.sourceType == "Google Maps" })
+        assertTrue(school.parsedCitations().any { it.uri == "https://atlantic-hall.net/admissions" })
+    }
+
+    @Test
+    fun `unclaimed verified online school exposes immediate inquiry and submit details without gate`() {
+        val onlineSchool = School(
+            id = "gmaps_ChIJOnline1",
+            adminUid = "",
+            name = "Corona Secondary School Agbara",
+            address = "Agbara Estate, Ogun",
+            latitude = 6.5050,
+            longitude = 3.1020,
+            verificationStatus = "VERIFIED_ONLINE",
+            verificationSource = "Google Search & Maps Grounding",
+            googleMapsPlaceRef = "places/ChIJOnline1",
+            googleMapsUrl = "https://www.google.com/maps/place/?q=place_id:ChIJOnline1",
+            sourceCitations = listOf("[Google Search] Corona Schools | https://coronaschools.org"),
+            boardingOption = "Day & Boarding",
+            admissionWindow = "Rolling Admissions 2026"
+        )
+        var extraDetailsTriggered = false
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                SchoolDetailView(
+                    fallbackSchoolItem = SchoolWithDistance(onlineSchool, 4.5),
+                    firestoreDetailState = UiState.Success(null),
+                    onMessageAdmin = {},
+                    onSubmitEnrollment = { _, _, _, _, _ -> },
+                    onClaimSchool = {},
+                    onSubmitExtraDetails = { extraDetailsTriggered = true }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("detail_verification_card").assertIsDisplayed()
+        val verifiedOnlineNodes = composeTestRule.onAllNodesWithText("Verified Online", useUnmergedTree = true)
+        assertTrue(verifiedOnlineNodes.fetchSemanticsNodes().isNotEmpty())
+        verifiedOnlineNodes[0].assertIsDisplayed()
+        composeTestRule.onNodeWithTag("detail_citation_chip_0").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("detail_apply_enroll_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("detail_claim_school_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("detail_submit_details_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(extraDetailsTriggered)
+    }
+
+    @Test
+    fun `buildTenAdvertSlides builds slides strictly from live adverts and real Google grounded schools`() {
+        val liveAd = com.example.data.Advert(
+            id = "ad_live_1",
+            ownerUid = "owner_1",
+            advertiserName = "Grange Admissions",
+            title = "2026 Scholarship Entrance",
+            body = "Apply early for Year 7 scholarships",
+            planTier = "District Hero",
+            status = "ACTIVE"
+        )
+        val realSchools = (1..9).map { idx ->
+            SchoolWithDistance(
+                school = School(
+                    id = "real_$idx",
+                    adminUid = "",
+                    name = "Verified School $idx",
+                    address = "Lagos",
+                    verificationStatus = "VERIFIED_ONLINE"
+                ),
+                distanceKm = idx.toDouble()
+            )
+        }
+        val slides = com.example.ui.buildTenAdvertSlides(
+            activeAdverts = listOf(com.example.data.AdvertWithDistance(liveAd, 1.4)),
+            realSchools = realSchools
+        )
+        assertEquals(10, slides.size)
+        assertTrue(slides.first().isLiveSponsored)
+        assertEquals("HERO AD", slides.first().badge)
+        assertEquals("2026 Scholarship Entrance", slides.first().title)
+        assertEquals("Verified School 1", slides[1].title)
+        assertEquals("VERIFIED ONLINE", slides[1].badge)
+        assertTrue(slides[1].schoolItem != null)
+    }
+
+    @Test
+    fun `discoverScreen 4x2 single-advert carousel supports right-to-left user swipe across real school slides`() {
+        val schoolOne = School(
+            id = "disc_carousel_1",
+            adminUid = "",
+            name = "Corona School Lekki",
+            address = "Lekki, Lagos",
+            latitude = 6.4474,
+            longitude = 3.4737,
+            verificationStatus = "VERIFIED_ONLINE"
+        )
+        val schoolTwo = School(
+            id = "disc_carousel_2",
+            adminUid = "",
+            name = "British International School",
+            address = "Oniru, Lagos",
+            latitude = 6.4320,
+            longitude = 3.4490,
+            verificationStatus = "VERIFIED_ONLINE"
+        )
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.DiscoverScreen(
+                    schoolsUiState = UiState.Success(listOf(schoolOne, schoolTwo)),
+                    filteredSchools = listOf(
+                        SchoolWithDistance(schoolOne, 0.8),
+                        SchoolWithDistance(schoolTwo, 2.3)
+                    ),
+                    filter = com.example.data.SchoolSearchFilter(
+                        centerLat = 6.4474,
+                        centerLng = 3.4737,
+                        centerLabel = "Lekki Phase 1, Lagos",
+                        radiusKm = 15
+                    ),
+                    isBusy = false,
+                    onUpdateFilter = {},
+                    onResetFilters = {},
+                    onMessageAdmin = {},
+                    onSubmitEnrollment = { _, _, _, _, _ -> },
+                    onRegisterSchoolClick = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_advert_grid_4x2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("advert_slide_0").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("advert_carousel_pager").performTouchInput {
+            swipeLeft()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("advert_slide_1").assertIsDisplayed()
+    }
+
+    @Test
+    fun `minimalist sidebar drawer includes Dashboard, Saved, Skolquik AI, Settings and privacy, and Help and support`() {
+        val activeTabState = androidx.compose.runtime.mutableStateOf(com.example.ui.MainTab.DISCOVER)
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = activeTabState.value,
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    userRole = "parent",
+                    isPlatformAdmin = false,
+                    favoriteCount = 2,
+                    snackbarHostState = snackbarHostState,
+                    onSelectTab = { activeTabState.value = it },
+                    onOpenProfile = {},
+                    onSignOut = {}
+                ) {
+                    androidx.compose.material3.Text("Current Tab: ${activeTabState.value.name}")
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_sidebar_button").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("sidebar_drawer_sheet").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("nav_dashboard").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_saved").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_ai_advisor").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_settings").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_help").performScrollTo().assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("nav_settings").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.SETTINGS, activeTabState.value)
+    }
+
+    @Test
+    fun `settingsPrivacyScreen lets user pick Sunrise Sunset theme and custom highlight hue`() {
+        val currentSettingsState = androidx.compose.runtime.mutableStateOf(ThemeSettings())
+        composeTestRule.setContent {
+            val currentSettings = currentSettingsState.value
+            SchoolCompassTheme(darkTheme = false, highlightHue = currentSettings.highlightHue, dynamicColor = false) {
+                com.example.ui.SettingsPrivacyScreen(
+                    themeSettings = currentSettings,
+                    latitude = 6.4474,
+                    longitude = 3.4737,
+                    locationLabel = "Lekki Phase 1, Lagos",
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    onSelectAppearanceMode = {
+                        currentSettingsState.value = currentSettingsState.value.copy(appearanceMode = it)
+                    },
+                    onSelectHighlightHue = {
+                        currentSettingsState.value = currentSettingsState.value.copy(highlightHue = it)
+                    },
+                    onToggleAutoOnlineDiscovery = {},
+                    onTogglePreciseLocation = {},
+                    onOpenProfile = {},
+                    onSignOut = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_privacy_screen")
+            .performScrollToNode(hasTestTag("theme_mode_SUNRISE_SUNSET"))
+        composeTestRule.onNodeWithTag("theme_mode_SUNRISE_SUNSET").performClick()
+        composeTestRule.onNodeWithTag("settings_privacy_screen")
+            .performScrollToNode(hasTestTag("theme_hue_CORAL_ROSE"))
+        composeTestRule.onNodeWithTag("theme_hue_CORAL_ROSE").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(ThemeAppearanceMode.SUNRISE_SUNSET, currentSettingsState.value.appearanceMode)
+        assertEquals(HighlightHue.CORAL_ROSE, currentSettingsState.value.highlightHue)
+    }
+
+    @Test
+    fun `dashboard saved and help screens render cleanly and parseGroundedTutorsResponse extracts verified providers`() {
+        val rawTutorsJson = """
+            [
+              {
+                "name": "PrepClass Africa",
+                "headline": "WAEC, IGCSE & JAMB Home & Online Tutors",
+                "bio": "Verified tutoring network across Lagos and Abuja.",
+                "address": "Yaba, Lagos",
+                "latitude": 6.5095,
+                "longitude": 3.3711,
+                "curriculumTracks": ["Cambridge", "Nigerian"],
+                "cambridgeSubjects": ["Cambridge IGCSE Mathematics"],
+                "nigerianSubjects": ["WAEC / NECO Mathematics"],
+                "qualifications": "Certified Exam Tutors",
+                "websiteUrl": "https://prepclass.com.ng"
+              }
+            ]
+        """.trimIndent()
+        val parsedTutors = com.example.data.OnlineSchoolGroundingService.parseGroundedTutorsResponse(
+            rawText = rawTutorsJson,
+            groundingLinks = emptyList(),
+            fallbackLat = 6.4474,
+            fallbackLng = 3.4737,
+            fallbackArea = "Lagos"
+        )
+        assertEquals(1, parsedTutors.size)
+        assertEquals("VERIFIED_ONLINE", parsedTutors.first().verificationStatus)
+        assertEquals("https://prepclass.com.ng", parsedTutors.first().websiteUrl)
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.DashboardScreen(
+                    displayName = "Amina Bello",
+                    userRole = "parent",
+                    filter = com.example.data.SchoolSearchFilter(),
+                    nearbySchools = emptyList(),
+                    savedSchoolsCount = 0,
+                    enrollmentsState = UiState.Success(emptyList()),
+                    conversationCount = 0,
+                    onNavigateTab = {},
+                    onRefreshOnline = {},
+                    onBack = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("dashboard_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dashboard_stat_nearby").assertIsDisplayed()
+    }
+
+    @Test
+    fun `messagesScreen displays modern chat header bubbles timestamps and sends messages`() {
+        val sampleConv = com.example.data.Conversation(
+            id = "conv_1",
+            schoolId = "school_1",
+            schoolName = "Greenhills Academy",
+            parentUid = "user_me",
+            parentName = "Amina Bello",
+            adminUid = "admin_jd",
+            adminName = "Jordan Davis",
+            memberUids = listOf("user_me", "admin_jd"),
+            lastMessage = "Hey! Are we still on for the campus tour?"
+        )
+        val selectedConvState = androidx.compose.runtime.mutableStateOf<com.example.data.Conversation?>(null)
+        val sentMessages = mutableListOf<String>()
+        val messagesListState = androidx.compose.runtime.mutableStateOf(
+            listOf(
+                com.example.data.ChatMessage(
+                    id = "m1",
+                    senderUid = "admin_jd",
+                    senderName = "Jordan Davis",
+                    senderRole = "admin",
+                    text = "Hey! Are we still on for the admissions tour at 3?"
+                ),
+                com.example.data.ChatMessage(
+                    id = "m2",
+                    senderUid = "user_me",
+                    senderName = "Amina Bello",
+                    senderRole = "parent",
+                    text = "Yes! Wrapping up our questions now."
+                )
+            )
+        )
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = true, dynamicColor = false) {
+                com.example.ui.MessagesScreen(
+                    currentUserId = "user_me",
+                    conversationsState = UiState.Success(listOf(sampleConv)),
+                    selectedConversation = selectedConvState.value,
+                    messagesState = UiState.Success(messagesListState.value),
+                    onSelectConversation = { selectedConvState.value = it },
+                    onSendMessage = { _, text ->
+                        sentMessages.add(text)
+                        messagesListState.value = messagesListState.value + com.example.data.ChatMessage(
+                            id = "m3",
+                            senderUid = "user_me",
+                            senderName = "Amina Bello",
+                            senderRole = "parent",
+                            text = text
+                        )
+                    },
+                    onBrowseSchoolsClick = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("messages_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("conversation_card_conv_1").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("chat_thread_view").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_header_avatar").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Online • Jordan Davis").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_message_bubble_m1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_message_bubble_m2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("chat_message_timestamp_m2").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("chat_message_input").performTextInput("See you at reception!")
+        composeTestRule.onNodeWithTag("chat_send_button").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf("See you at reception!"), sentMessages)
+        composeTestRule.onNodeWithText("See you at reception!").assertIsDisplayed()
     }
 }

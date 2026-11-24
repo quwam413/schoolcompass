@@ -1,6 +1,7 @@
 package com.example.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,29 +10,26 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,307 +67,227 @@ fun MessagesScreen(
         return
     }
 
-    Column(
+    var searchQuery by remember { mutableStateOf("") }
+    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .testTag("messages_screen"),
+        contentAlignment = Alignment.TopCenter
     ) {
-        Text(
-            text = "Direct Messages",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Real-time conversations between parents and school administrators",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.size(12.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = 640.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            Text(
+                text = "Messages",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Direct conversations between parents and school administrators",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
 
-        when (conversationsState) {
-            UiState.Loading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+            when (conversationsState) {
+                UiState.Loading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
                 }
-            }
-            is UiState.Error -> {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = conversationsState.message,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
-            is UiState.Success -> {
-                val list = conversationsState.data
-                if (list.isEmpty()) {
-                    EmptyStateCard(
-                        icon = Icons.Outlined.Forum,
-                        title = "No messages yet",
-                        subtitle = "Open any school in Discover and tap 'Message Admin' to ask about admissions, fees, curriculum, or campus tours.",
-                        actionLabel = "Explore Schools",
-                        onAction = onBrowseSchoolsClick
-                    )
-                } else {
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(bottom = 24.dp)
+                is UiState.Error -> {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(list, key = { it.id }) { conv ->
-                            val isAdminView = conv.adminUid == currentUserId && conv.parentUid != currentUserId
-                            val counterpartName = if (isAdminView) conv.parentName else conv.adminName
-                            val roleLabel = if (isAdminView) "Parent Inquiry" else "School Admin"
+                        Text(
+                            text = conversationsState.message,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+                is UiState.Success -> {
+                    val allConversations = conversationsState.data
+                    if (allConversations.isEmpty()) {
+                        EmptyStateCard(
+                            icon = Icons.Outlined.Forum,
+                            title = "No messages yet",
+                            subtitle = "Open any school in Discover and tap 'Message Admin' to ask about admissions, fees, curriculum, or campus tours.",
+                            actionLabel = "Explore Schools",
+                            onAction = onBrowseSchoolsClick
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search conversations...") },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.Search,
+                                    contentDescription = "Search conversations"
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Close,
+                                            contentDescription = "Clear search"
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("messages_search_input")
+                        )
 
-                            Surface(
-                                onClick = { onSelectConversation(conv) },
-                                shape = MaterialTheme.shapes.medium,
-                                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                tonalElevation = 1.dp,
+                        Spacer(Modifier.height(12.dp))
+
+                        val filteredConversations = remember(allConversations, searchQuery) {
+                            val q = searchQuery.trim()
+                            if (q.isEmpty()) {
+                                allConversations
+                            } else {
+                                allConversations.filter { conv ->
+                                    conv.schoolName.contains(q, ignoreCase = true) ||
+                                        conv.adminName.contains(q, ignoreCase = true) ||
+                                        conv.parentName.contains(q, ignoreCase = true) ||
+                                        conv.lastMessage.contains(q, ignoreCase = true)
+                                }
+                            }
+                        }
+
+                        if (filteredConversations.isEmpty()) {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("conversation_card_${conv.id}")
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer,
-                                        modifier = Modifier.size(46.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = conv.schoolName.take(1).uppercase(),
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
+                                Text(
+                                    text = "No matching conversations for \"$searchQuery\".",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                contentPadding = PaddingValues(bottom = 24.dp)
+                            ) {
+                                items(filteredConversations, key = { it.id }) { conv ->
+                                    val isAdminView = conv.adminUid == currentUserId && conv.parentUid != currentUserId
+                                    val counterpartName = if (isAdminView) {
+                                        conv.parentName.ifBlank { "Parent" }
+                                    } else {
+                                        conv.adminName.ifBlank { conv.schoolName }
                                     }
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    val roleLabel = if (isAdminView) "Parent Inquiry" else "School Admin"
+                                    val updatedLabel = conv.updatedAt?.toDate()?.let { timeFormatter.format(it) } ?: "Online"
+
+                                    Surface(
+                                        onClick = { onSelectConversation(conv) },
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        border = BorderStroke(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("conversation_card_${conv.id}")
+                                    ) {
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.padding(14.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text(
-                                                text = conv.schoolName,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
+                                            GradientInitialsAvatar(
+                                                initials = initialsFor(
+                                                    conv.schoolName.ifBlank { counterpartName }
+                                                ),
+                                                size = 46.dp,
+                                                showOnlineDot = true
                                             )
-                                            Surface(
-                                                shape = MaterialTheme.shapes.extraSmall,
-                                                color = MaterialTheme.colorScheme.secondaryContainer
+                                            Column(
+                                                modifier = Modifier.weight(1f),
+                                                verticalArrangement = Arrangement.spacedBy(2.dp)
                                             ) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = conv.schoolName.ifBlank { counterpartName },
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    Spacer(Modifier.size(8.dp))
+                                                    Text(
+                                                        text = updatedLabel,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = counterpartName,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.Medium,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.weight(1f, fill = false)
+                                                    )
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer
+                                                    ) {
+                                                        Text(
+                                                            text = roleLabel,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
                                                 Text(
-                                                    text = roleLabel,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    text = conv.lastMessage.ifBlank { "Tap to start chatting" },
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
                                                 )
                                             }
                                         }
-                                        Text(
-                                            text = counterpartName,
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            text = conv.lastMessage,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConversationThreadView(
-    currentUserId: String,
-    conversation: Conversation,
-    messagesState: UiState<List<ChatMessage>>,
-    onBack: () -> Unit,
-    onSend: (String) -> Unit
-) {
-    var draft by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
-    val formatter = remember { SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()) }
-
-    val messages = (messagesState as? UiState.Success)?.data ?: emptyList()
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
-    ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag("chat_back_button")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to messages")
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = conversation.schoolName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Admin: ${conversation.adminName} • Parent: ${conversation.parentName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-        }
-
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when (messagesState) {
-                UiState.Loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                is UiState.Error -> Text(
-                    text = messagesState.message,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.align(Alignment.Center).padding(16.dp)
-                )
-                is UiState.Success -> {
-                    if (messages.isEmpty()) {
-                        Text(
-                            text = "Start the conversation with ${conversation.schoolName}.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.align(Alignment.Center).padding(24.dp)
-                        )
-                    } else {
-                        LazyColumn(
-                            state = listState,
-                            contentPadding = PaddingValues(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            items(messages, key = { it.id }) { msg ->
-                                val isMine = msg.senderUid == currentUserId
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(
-                                            topStart = 16.dp,
-                                            topEnd = 16.dp,
-                                            bottomStart = if (isMine) 16.dp else 4.dp,
-                                            bottomEnd = if (isMine) 4.dp else 16.dp
-                                        ),
-                                        color = if (isMine) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        modifier = Modifier.widthIn(max = 300.dp)
-                                    ) {
-                                        Column(modifier = Modifier.padding(12.dp)) {
-                                            Text(
-                                                text = "${msg.senderName} (${msg.senderRole})",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                                                else MaterialTheme.colorScheme.primary
-                                            )
-                                            Spacer(Modifier.size(2.dp))
-                                            Text(
-                                                text = msg.text,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = if (isMine) MaterialTheme.colorScheme.onPrimary
-                                                else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            val timeText = msg.createdAt?.toDate()?.let { formatter.format(it) } ?: "Sending…"
-                                            Text(
-                                                text = timeText,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = if (isMine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.65f)
-                                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(top = 4.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    placeholder = { Text("Write a message…") },
-                    maxLines = 4,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("chat_message_input")
-                )
-                FilledIconButton(
-                    onClick = {
-                        val trimmed = draft.trim()
-                        if (trimmed.isNotEmpty()) {
-                            onSend(trimmed)
-                            draft = ""
-                        }
-                    },
-                    enabled = draft.isNotBlank(),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("chat_send_button")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send message")
                 }
             }
         }

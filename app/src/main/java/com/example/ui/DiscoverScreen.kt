@@ -5,7 +5,10 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,12 +23,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Favorite
@@ -33,22 +44,25 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Tune
-import com.example.ui.theme.FavoriteHeartColor
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,12 +71,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.data.Advert
 import com.example.data.AdvertWithDistance
@@ -70,39 +87,51 @@ import com.example.data.Announcement
 import com.example.data.FaithFilter
 import com.example.data.GoogleMapsPlatformService
 import com.example.data.School
-import com.example.data.SchoolConstants
 import com.example.data.SchoolSearchFilter
 import com.example.data.SchoolWithDistance
 import com.example.data.SpecialFilter
+import com.example.ui.theme.FavoriteHeartColor
 import com.example.ui.theme.StarGold
 import com.example.ui.theme.StatusPresentGreen
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.MapsInitializer
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.maps.android.compose.rememberCameraPositionState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DiscoverScreen(
     schoolsUiState: UiState<List<School>>,
     filteredSchools: List<SchoolWithDistance>,
     filter: SchoolSearchFilter,
     isBusy: Boolean,
+    isRefreshingHome: Boolean = false,
     isNetworkOnline: Boolean = true,
     connectionLabel: String = "Internet Connected",
     externalDirectoryLoading: Boolean = false,
     externalDirectoryError: String? = null,
+    onlineGroundingLoading: Boolean = false,
+    onlineGroundingError: String? = null,
     isGeocodingLocation: Boolean = false,
+    onPullToRefreshHome: () -> Unit = {},
     onRefreshExternalSchools: () -> Unit = {},
+    onSearchOnline: () -> Unit = {},
     onGeocodeSearch: (String) -> Unit = {},
     onUpdateFilter: ((SchoolSearchFilter) -> SchoolSearchFilter) -> Unit,
     onResetFilters: () -> Unit,
     onMessageAdmin: (School) -> Unit,
     onSubmitEnrollment: (School, String, String, String?, PaymentSubmissionDraft?) -> Unit,
     onClaimSchool: (School) -> Unit = {},
-    onSeedSampleSchools: () -> Unit,
+    onSubmitExtraDetails: (
+        School, Long, Long, String, String, Boolean, String?, String?,
+        List<String>, String?, List<String>, List<String>, String?, String?
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _, _, _, _, _ -> },
     onRegisterSchoolClick: () -> Unit,
     activeAdverts: List<AdvertWithDistance> = emptyList(),
     onOpenPaidAdverts: () -> Unit = {},
@@ -114,7 +143,9 @@ fun DiscoverScreen(
     onSelectSchoolForDetail: (School?) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val fusedClient = remember(context) { LocationServices.getFusedLocationProviderClient(context) }
+    val fusedClient = remember(context) {
+        runCatching { LocationServices.getFusedLocationProviderClient(context) }.getOrNull()
+    }
 
     var previousOnline by remember { mutableStateOf(isNetworkOnline) }
     LaunchedEffect(isNetworkOnline) {
@@ -127,6 +158,7 @@ fun DiscoverScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     var selectedSchoolItem by remember { mutableStateOf<SchoolWithDistance?>(null) }
     var inspectedAdvert by remember { mutableStateOf<Advert?>(null) }
+    var enrichingSchool by remember { mutableStateOf<School?>(null) }
 
     LaunchedEffect(selectedSchoolItem?.school?.id) {
         onSelectSchoolForDetail(selectedSchoolItem?.school)
@@ -147,14 +179,31 @@ fun DiscoverScreen(
         position = CameraPosition.fromLatLngZoom(centerLatLng, zoomForRadiusKm(filter.radiusKm))
     }
 
-    LaunchedEffect(filter.centerLat, filter.centerLng, filter.radiusKm) {
-        cameraPositionState.animate(
-            update = CameraUpdateFactory.newLatLngZoom(
-                LatLng(filter.centerLat, filter.centerLng),
-                zoomForRadiusKm(filter.radiusKm)
-            ),
-            durationMs = 350
-        )
+    var mapsSdkReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val status = runCatching {
+            MapsInitializer.initialize(context.applicationContext)
+        }.getOrDefault(-1)
+        mapsSdkReady = (status == 0)
+    }
+
+    LaunchedEffect(mapsSdkReady, filter.centerLat, filter.centerLng, filter.radiusKm) {
+        val target = LatLng(filter.centerLat, filter.centerLng)
+        val zoom = zoomForRadiusKm(filter.radiusKm)
+        if (!mapsSdkReady) {
+            cameraPositionState.position = CameraPosition.fromLatLngZoom(target, zoom)
+            return@LaunchedEffect
+        }
+        try {
+            cameraPositionState.animate(
+                update = CameraUpdateFactory.newLatLngZoom(target, zoom),
+                durationMs = 350
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            cameraPositionState.position = CameraPosition.fromLatLngZoom(target, zoom)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -175,32 +224,49 @@ fun DiscoverScreen(
                 )
             }
         }
-        fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
-            .addOnSuccessListener { currentLoc ->
-                if (currentLoc != null) {
-                    isLocatingUser = false
-                    applyGpsCoordinates(currentLoc.latitude, currentLoc.longitude)
-                } else {
-                    fusedClient.lastLocation
-                        .addOnSuccessListener { lastLoc ->
-                            isLocatingUser = false
-                            if (lastLoc != null) {
-                                applyGpsCoordinates(lastLoc.latitude, lastLoc.longitude)
-                            }
-                        }
-                        .addOnFailureListener { isLocatingUser = false }
-                }
-            }
-            .addOnFailureListener {
-                fusedClient.lastLocation
-                    .addOnSuccessListener { lastLoc ->
+        val client = fusedClient
+        if (client == null) {
+            isLocatingUser = false
+            return
+        }
+        try {
+            client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+                .addOnSuccessListener { currentLoc ->
+                    if (currentLoc != null) {
                         isLocatingUser = false
-                        if (lastLoc != null) {
-                            applyGpsCoordinates(lastLoc.latitude, lastLoc.longitude)
+                        applyGpsCoordinates(currentLoc.latitude, currentLoc.longitude)
+                    } else {
+                        try {
+                            client.lastLocation
+                                .addOnSuccessListener { lastLoc ->
+                                    isLocatingUser = false
+                                    if (lastLoc != null) {
+                                        applyGpsCoordinates(lastLoc.latitude, lastLoc.longitude)
+                                    }
+                                }
+                                .addOnFailureListener { isLocatingUser = false }
+                        } catch (_: Exception) {
+                            isLocatingUser = false
                         }
                     }
-                    .addOnFailureListener { isLocatingUser = false }
-            }
+                }
+                .addOnFailureListener {
+                    try {
+                        client.lastLocation
+                            .addOnSuccessListener { lastLoc ->
+                                isLocatingUser = false
+                                if (lastLoc != null) {
+                                    applyGpsCoordinates(lastLoc.latitude, lastLoc.longitude)
+                                }
+                            }
+                            .addOnFailureListener { isLocatingUser = false }
+                    } catch (_: Exception) {
+                        isLocatingUser = false
+                    }
+                }
+        } catch (_: Exception) {
+            isLocatingUser = false
+        }
     }
 
     val gpsPermLauncher = rememberLauncherForActivityResult(
@@ -221,12 +287,16 @@ fun DiscoverScreen(
             hasLocationPermission = true
             centerOnGps()
         } else {
-            gpsPermLauncher.launch(
-                arrayOf(
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION
+            runCatching {
+                gpsPermLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    )
                 )
-            )
+            }.onFailure {
+                locationDeniedHint = true
+            }
         }
     }
 
@@ -250,46 +320,80 @@ fun DiscoverScreen(
     @Composable
     fun SearchAndQuickFilterHeader() {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = filter.query,
-                    onValueChange = { q -> onUpdateFilter { it.copy(query = q) } },
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    placeholder = { Text("Search school, uni, course, curriculum…") },
-                    singleLine = true,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("discover_search_input")
-                )
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(54.dp)
-                ) {
-                    IconButton(
-                        onClick = { showFilterSheet = true },
-                        modifier = Modifier.testTag("open_filters_button")
+            OutlinedTextField(
+                value = filter.query,
+                onValueChange = { q -> onUpdateFilter { it.copy(query = q) } },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingIcon = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.padding(end = 4.dp)
                     ) {
-                        BadgedBox(
-                            badge = {
-                                if (activeFilterCount > 0) {
-                                    Badge { Text("$activeFilterCount") }
-                                }
-                            }
+                        IconButton(
+                            onClick = onSearchOnline,
+                            enabled = !onlineGroundingLoading,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("discover_search_online_button")
                         ) {
-                            Icon(
-                                Icons.Filled.Tune,
-                                contentDescription = "Open school filters",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                            if (onlineGroundingLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Filled.TravelExplore,
+                                    contentDescription = "Search verified schools online",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { showFilterSheet = true },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .testTag("open_filters_button")
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    if (activeFilterCount > 0) {
+                                        Badge { Text("$activeFilterCount") }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Tune,
+                                    contentDescription = "Open school filters",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
-                }
-            }
+                },
+                placeholder = { Text("Search schools, curricula, cities…") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onSearchOnline() }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("discover_search_input")
+            )
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
@@ -301,10 +405,10 @@ fun DiscoverScreen(
                                 imageVector = Icons.Filled.Favorite,
                                 contentDescription = null,
                                 tint = if (filter.onlyFavorites) FavoriteHeartColor else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         },
-                        label = { Text("Favorites (${favoriteSchoolIds.size})") },
+                        label = { Text("Saved (${favoriteSchoolIds.size})") },
                         modifier = Modifier.testTag("favorites_filter_chip")
                     )
                 }
@@ -317,14 +421,14 @@ fun DiscoverScreen(
                                 imageVector = Icons.Filled.AutoAwesome,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         },
-                        label = { Text("Ask Skolquik AI") },
+                        label = { Text("Ask AI") },
                         modifier = Modifier.testTag("discover_ai_advisor_chip")
                     )
                 }
-                items(SchoolConstants.INSTITUTION_TYPES) { instType ->
+                items(listOf("Primary & Secondary", "University")) { instType ->
                     FilterChip(
                         selected = filter.institutionType == instType,
                         onClick = {
@@ -334,48 +438,23 @@ fun DiscoverScreen(
                         modifier = Modifier.testTag("institution_type_chip_$instType")
                     )
                 }
-                items(listOf("Nigerian", "British", "Nigerian & British")) { curr ->
+                item {
                     FilterChip(
-                        selected = filter.curriculum == curr,
+                        selected = filter.curriculum == "Nigerian & British",
                         onClick = {
-                            onUpdateFilter { it.copy(curriculum = if (it.curriculum == curr) null else curr) }
+                            onUpdateFilter {
+                                it.copy(curriculum = if (it.curriculum == "Nigerian & British") null else "Nigerian & British")
+                            }
                         },
-                        label = { Text(curr) },
-                        modifier = Modifier.testTag("curriculum_chip_$curr")
+                        label = { Text("Dual Curriculum") },
+                        modifier = Modifier.testTag("curriculum_chip_Nigerian & British")
                     )
                 }
                 item {
                     FilterChip(
-                        selected = filter.faithFilter == FaithFilter.FAITH_BASED,
-                        onClick = {
-                            onUpdateFilter {
-                                it.copy(
-                                    faithFilter = if (it.faithFilter == FaithFilter.FAITH_BASED) {
-                                        FaithFilter.ALL
-                                    } else {
-                                        FaithFilter.FAITH_BASED
-                                    }
-                                )
-                            }
-                        },
-                        label = { Text("Faith-Based") }
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = filter.specialSchoolFilter == SpecialFilter.SPECIAL_ONLY,
-                        onClick = {
-                            onUpdateFilter {
-                                it.copy(
-                                    specialSchoolFilter = if (it.specialSchoolFilter == SpecialFilter.SPECIAL_ONLY) {
-                                        SpecialFilter.ALL
-                                    } else {
-                                        SpecialFilter.SPECIAL_ONLY
-                                    }
-                                )
-                            }
-                        },
-                        label = { Text("Special Ed") }
+                        selected = activeFilterCount > 0,
+                        onClick = { showFilterSheet = true },
+                        label = { Text(if (activeFilterCount > 0) "Filters ($activeFilterCount)" else "More Filters") }
                     )
                 }
             }
@@ -401,17 +480,37 @@ fun DiscoverScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            if (externalDirectoryLoading) {
+            if (onlineGroundingLoading || externalDirectoryLoading) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                     Text(
-                        text = "Discovering existing geolocated schools nearby…",
+                        text = if (onlineGroundingLoading) {
+                            "Searching Google & Maps for verified schools…"
+                        } else {
+                            "Discovering verified schools nearby…"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+            } else if (onlineGroundingError != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Online school search notice: $onlineGroundingError",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onSearchOnline) {
+                        Text("Retry")
+                    }
                 }
             } else if (externalDirectoryError != null) {
                 Row(
@@ -433,6 +532,13 @@ fun DiscoverScreen(
         }
     }
 
+    PullToRefreshBox(
+        isRefreshing = isRefreshingHome,
+        onRefresh = onPullToRefreshHome,
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("discover_pull_to_refresh")
+    ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWideScreen = maxWidth >= 840.dp
 
@@ -440,14 +546,15 @@ fun DiscoverScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                AdvertSpotlightGrid4x2(
+                AdvertSpotlightCarousel4x2(
                     activeAdverts = activeAdverts,
-                    onAdvertClick = { ad ->
-                        if (ad != null) inspectedAdvert = ad else onOpenPaidAdverts()
-                    },
+                    realSchools = filteredSchools,
+                    onAdvertClick = { ad -> inspectedAdvert = ad },
+                    onSchoolSlideClick = { schoolItem -> selectedSchoolItem = schoolItem },
+                    onDiscoverOnline = onSearchOnline,
                     onOpenPaidAdverts = onOpenPaidAdverts
                 )
 
@@ -459,7 +566,7 @@ fun DiscoverScreen(
                 ) {
                     Column(
                         modifier = Modifier
-                            .weight(0.52f)
+                            .weight(0.50f)
                             .fillMaxHeight()
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -483,7 +590,7 @@ fun DiscoverScreen(
 
                     LazyColumn(
                         modifier = Modifier
-                            .weight(0.48f)
+                            .weight(0.50f)
                             .fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
@@ -497,14 +604,14 @@ fun DiscoverScreen(
                             }
                             is UiState.Error -> item { ErrorBanner(schoolsUiState.message) }
                             is UiState.Success -> {
-                                if (filteredSchools.isEmpty() && schoolsUiState.data.isEmpty() && !externalDirectoryLoading) {
+                                if (filteredSchools.isEmpty() && schoolsUiState.data.isEmpty() && !externalDirectoryLoading && !onlineGroundingLoading) {
                                     item {
                                         EmptyStateCard(
                                             icon = Icons.Filled.School,
-                                            title = "No schools found around ${filter.centerLabel}",
-                                            subtitle = "Register a new school in the Admin Hub, retry map discovery, or load sample Nigerian & British schools around ${filter.centerLabel}.",
-                                            actionLabel = if (isBusy) "Loading…" else "Load Sample Schools Around Me",
-                                            onAction = { if (!isBusy) onSeedSampleSchools() }
+                                            title = "No schools cached around ${filter.centerLabel}",
+                                            subtitle = "Pull down to reload or query Google Search & Maps for verified schools near ${filter.centerLabel}.",
+                                            actionLabel = if (onlineGroundingLoading) "Searching Google…" else "Discover Schools via Google",
+                                            onAction = onSearchOnline
                                         )
                                     }
                                     item {
@@ -512,7 +619,7 @@ fun DiscoverScreen(
                                             onClick = onRegisterSchoolClick,
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Text("Or Register Your Own School")
+                                            Text("Register or Claim a School")
                                         }
                                     }
                                 } else if (filteredSchools.isEmpty() && !externalDirectoryLoading) {
@@ -520,7 +627,7 @@ fun DiscoverScreen(
                                         EmptyStateCard(
                                             icon = Icons.Filled.LocationOn,
                                             title = "No schools match within ${filter.radiusKm} km",
-                                            subtitle = "Drag the radius slider wider or reset your curriculum, fee, or sports filters.",
+                                            subtitle = "Widen your radius or reset your filters.",
                                             actionLabel = "Reset Filters & Expand",
                                             onAction = {
                                                 onResetFilters()
@@ -534,6 +641,8 @@ fun DiscoverScreen(
                                             item = item,
                                             isFavorite = item.school.id in favoriteSchoolIds,
                                             onToggleFavorite = onToggleFavoriteSchool,
+                                            onSubmitExtraDetails = { enrichingSchool = it },
+                                            onClaimSchool = onClaimSchool,
                                             onClick = { selectedSchoolItem = item }
                                         )
                                     }
@@ -547,16 +656,17 @@ fun DiscoverScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // 4x2 Advert Tile Grid pinned at the very top of the Home Screen
+                // Single-Advert 4x2 Moving Carousel (up to 10 live/verified adverts, slides right-to-left)
                 item {
-                    AdvertSpotlightGrid4x2(
+                    AdvertSpotlightCarousel4x2(
                         activeAdverts = activeAdverts,
-                        onAdvertClick = { ad ->
-                            if (ad != null) inspectedAdvert = ad else onOpenPaidAdverts()
-                        },
+                        realSchools = filteredSchools,
+                        onAdvertClick = { ad -> inspectedAdvert = ad },
+                        onSchoolSlideClick = { schoolItem -> selectedSchoolItem = schoolItem },
+                        onDiscoverOnline = onSearchOnline,
                         onOpenPaidAdverts = onOpenPaidAdverts
                     )
                 }
@@ -591,14 +701,14 @@ fun DiscoverScreen(
                     }
                     is UiState.Error -> item { ErrorBanner(schoolsUiState.message) }
                     is UiState.Success -> {
-                        if (filteredSchools.isEmpty() && schoolsUiState.data.isEmpty() && !externalDirectoryLoading) {
+                        if (filteredSchools.isEmpty() && schoolsUiState.data.isEmpty() && !externalDirectoryLoading && !onlineGroundingLoading) {
                             item {
                                 EmptyStateCard(
                                     icon = Icons.Filled.School,
-                                    title = "No schools found around ${filter.centerLabel}",
-                                    subtitle = "Register a new school in the Admin Hub, retry map discovery, or load sample Nigerian & British schools around ${filter.centerLabel}.",
-                                    actionLabel = if (isBusy) "Loading…" else "Load Sample Schools Around Me",
-                                    onAction = { if (!isBusy) onSeedSampleSchools() }
+                                    title = "No schools cached around ${filter.centerLabel}",
+                                    subtitle = "Pull down to reload or query Google Search & Maps for verified schools near ${filter.centerLabel}.",
+                                    actionLabel = if (onlineGroundingLoading) "Searching Google…" else "Discover Schools via Google",
+                                    onAction = onSearchOnline
                                 )
                             }
                             item {
@@ -606,7 +716,7 @@ fun DiscoverScreen(
                                     onClick = onRegisterSchoolClick,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("Or Register Your Own School")
+                                    Text("Register or Claim a School")
                                 }
                             }
                         } else if (filteredSchools.isEmpty() && !externalDirectoryLoading) {
@@ -628,6 +738,8 @@ fun DiscoverScreen(
                                     item = item,
                                     isFavorite = item.school.id in favoriteSchoolIds,
                                     onToggleFavorite = onToggleFavoriteSchool,
+                                    onSubmitExtraDetails = { enrichingSchool = it },
+                                    onClaimSchool = onClaimSchool,
                                     onClick = { selectedSchoolItem = item }
                                 )
                             }
@@ -637,6 +749,7 @@ fun DiscoverScreen(
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
+    }
     }
 
     if (showFilterSheet) {
@@ -666,6 +779,23 @@ fun DiscoverScreen(
             onClaimSchool = { school ->
                 selectedSchoolItem = null
                 onClaimSchool(school)
+            },
+            onSubmitExtraDetails = { school ->
+                enrichingSchool = school
+            }
+        )
+    }
+
+    enrichingSchool?.let { targetSchool ->
+        SubmitSchoolDetailsDialog(
+            school = targetSchool,
+            onDismiss = { enrichingSchool = null },
+            onSubmit = { feeMin, feeMax, curr, period, open, window, boarding, photos, notes, courses, grades, site, phone ->
+                onSubmitExtraDetails(
+                    targetSchool, feeMin, feeMax, curr, period, open,
+                    window, boarding, photos, notes, courses, grades, site, phone
+                )
+                enrichingSchool = null
             }
         )
     }
@@ -711,181 +841,275 @@ fun DiscoverScreen(
     }
 }
 
-private data class HomeAdvertTileSlot(
+internal data class HomeAdvertSlide(
     val badge: String,
     val title: String,
     val subtitle: String,
+    val ctaText: String,
     val advert: Advert?,
-    val isLiveSponsored: Boolean
+    val schoolItem: SchoolWithDistance? = null,
+    val isLiveSponsored: Boolean,
+    val accentPair: Pair<Color, Color>
 )
 
-@Composable
-private fun AdvertSpotlightGrid4x2(
+internal fun buildTenAdvertSlides(
     activeAdverts: List<AdvertWithDistance>,
-    onAdvertClick: (Advert?) -> Unit,
-    onOpenPaidAdverts: () -> Unit
-) {
-    val fallbackPrompts = remember {
-        listOf(
-            HomeAdvertTileSlot("AD SLOT", "Promote School", "From ₦15k", null, false),
-            HomeAdvertTileSlot("TUTORS", "Cambridge & WAEC", "Boost Classes", null, false),
-            HomeAdvertTileSlot("HERO AD", "Admissions Open", "District Hero", null, false),
-            HomeAdvertTileSlot("CAMP", "Sports & STEM", "Holiday Ads", null, false),
-            HomeAdvertTileSlot("UNI / POLY", "Tertiary Spotlight", "Course Promo", null, false),
-            HomeAdvertTileSlot("PREP", "JAMB / IGCSE", "Exam Bootcamps", null, false),
-            HomeAdvertTileSlot("SPOTLIGHT", "Special Needs", "Parent Reach", null, false),
-            HomeAdvertTileSlot("POST AD", "Launch Campaign", "4×2 Banner", null, false)
-        )
+    realSchools: List<SchoolWithDistance> = emptyList()
+): List<HomeAdvertSlide> {
+    val palettes = listOf(
+        Color(0xFF0B3B75) to Color(0xFF1565C0),
+        Color(0xFF153243) to Color(0xFF284B63),
+        Color(0xFF1E3A5F) to Color(0xFF2D6A8E),
+        Color(0xFF1F4E46) to Color(0xFF2E7D6B),
+        Color(0xFF2B2D42) to Color(0xFF4A507A),
+        Color(0xFF1A434E) to Color(0xFF2B7A78),
+        Color(0xFF2C3E50) to Color(0xFF4CA1AF),
+        Color(0xFF223843) to Color(0xFF3E6985),
+        Color(0xFF1B3B36) to Color(0xFF316D62),
+        Color(0xFF1F2D4A) to Color(0xFF3B5998)
+    )
+
+    val combined = buildList {
+        activeAdverts.forEachIndexed { idx, advDist ->
+            if (size >= 10) return@forEachIndexed
+            val live = advDist.advert
+            add(
+                HomeAdvertSlide(
+                    badge = if (live.planTier == "District Hero") "HERO AD" else "SPONSORED",
+                    title = live.title,
+                    subtitle = "${live.advertiserName} • ${live.targetLocation.ifBlank { live.category }}",
+                    ctaText = live.ctaLabel.ifBlank { "View Offer" },
+                    advert = live,
+                    schoolItem = null,
+                    isLiveSponsored = true,
+                    accentPair = palettes[idx % palettes.size]
+                )
+            )
+        }
+        realSchools.forEach { item ->
+            if (size >= 10) return@forEach
+            val s = item.school
+            val idx = size
+            add(
+                HomeAdvertSlide(
+                    badge = s.verificationBadgeLabel().uppercase(),
+                    title = s.name,
+                    subtitle = buildString {
+                        append(s.curriculum)
+                        if (s.address.isNotBlank()) append(" • ${s.address}")
+                    },
+                    ctaText = "View School",
+                    advert = null,
+                    schoolItem = item,
+                    isLiveSponsored = false,
+                    accentPair = palettes[idx % palettes.size]
+                )
+            )
+        }
     }
 
-    val slots = remember(activeAdverts) {
-        (0 until 8).map { idx ->
-            val live = activeAdverts.getOrNull(idx)?.advert
-            if (live != null) {
-                HomeAdvertTileSlot(
-                    badge = if (live.planTier == "District Hero") "HERO" else "AD",
-                    title = live.title,
-                    subtitle = live.advertiserName,
-                    advert = live,
-                    isLiveSponsored = true
+    if (combined.isNotEmpty()) {
+        return combined.take(10)
+    }
+
+    return listOf(
+        HomeAdvertSlide(
+            badge = "GOOGLE LIVE SEARCH",
+            title = "Discovering Real Schools Nearby",
+            subtitle = "Pull down or tap to search Google Search & Maps for verified schools around you.",
+            ctaText = "Search Google",
+            advert = null,
+            schoolItem = null,
+            isLiveSponsored = false,
+            accentPair = palettes[0]
+        )
+    )
+}
+
+@Composable
+private fun AdvertSpotlightCarousel4x2(
+    activeAdverts: List<AdvertWithDistance>,
+    realSchools: List<SchoolWithDistance>,
+    onAdvertClick: (Advert) -> Unit,
+    onSchoolSlideClick: (SchoolWithDistance) -> Unit,
+    onDiscoverOnline: () -> Unit,
+    onOpenPaidAdverts: () -> Unit
+) {
+    val slides = remember(activeAdverts, realSchools) {
+        buildTenAdvertSlides(activeAdverts, realSchools)
+    }
+    val virtualPageCount = if (slides.size <= 1) 1 else slides.size * 1000
+    val startPage = if (slides.size <= 1) 0 else slides.size * 500
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { virtualPageCount })
+    val activeIndex = if (slides.isEmpty()) 0 else pagerState.currentPage % slides.size
+
+    // Automatic right-to-left sliding across live adverts & real schools; pauses while user drags
+    LaunchedEffect(pagerState, slides.size) {
+        if (slides.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(4000L)
+            if (!pagerState.isScrollInProgress) {
+                pagerState.animateScrollToPage(
+                    page = pagerState.currentPage + 1,
+                    animationSpec = tween(durationMillis = 550)
                 )
-            } else {
-                fallbackPrompts[idx]
             }
         }
     }
 
+    // Single 4x2-proportioned moving advert card
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier
             .fillMaxWidth()
+            .height(160.dp)
             .testTag("home_advert_grid_4x2")
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Campaign,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "Sponsored Adverts",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Text(
-                    text = "Post / All Adverts →",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clickable { onOpenPaidAdverts() }
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                        .testTag("discover_paid_adverts_banner")
-                )
-            }
+        HorizontalPager(
+            state = pagerState,
+            beyondViewportPageCount = 1,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("advert_carousel_pager")
+        ) { virtualPage ->
+            val slideIndex = virtualPage % slides.size
+            val slide = slides[slideIndex]
 
-            // 4 columns x 2 rows = 8 tiles
-            for (rowIdx in 0 until 2) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(slide.accentPair.first, slide.accentPair.second)
+                        )
+                    )
+                    .clickable {
+                        when {
+                            slide.advert != null -> onAdvertClick(slide.advert)
+                            slide.schoolItem != null -> onSchoolSlideClick(slide.schoolItem)
+                            else -> onDiscoverOnline()
+                        }
+                    }
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                    .testTag("advert_slide_$slideIndex")
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    for (colIdx in 0 until 4) {
-                        val tileIdx = rowIdx * 4 + colIdx
-                        val slot = slots[tileIdx]
-                        val bgColor = when {
-                            slot.isLiveSponsored && slot.badge == "HERO" ->
-                                MaterialTheme.colorScheme.secondaryContainer
-                            slot.isLiveSponsored ->
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-                            else ->
-                                MaterialTheme.colorScheme.surfaceContainerHigh
-                        }
-                        val fgColor = when {
-                            slot.isLiveSponsored && slot.badge == "HERO" ->
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            slot.isLiveSponsored ->
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            else ->
-                                MaterialTheme.colorScheme.onSurface
-                        }
+                    // Top Bar: Badge + Index & Post Ad Link
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Surface(
-                            onClick = { onAdvertClick(slot.advert) },
-                            shape = MaterialTheme.shapes.small,
-                            color = bgColor,
-                            border = BorderStroke(
-                                width = 1.dp,
-                                color = if (slot.isLiveSponsored) {
-                                    StarGold.copy(alpha = 0.7f)
-                                } else {
-                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                }
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(68.dp)
-                                .testTag("home_advert_tile_$tileIdx")
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White.copy(alpha = 0.16f)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 6.dp, vertical = 5.dp),
-                                verticalArrangement = Arrangement.SpaceBetween
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    if (slot.isLiveSponsored) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Star,
-                                            contentDescription = null,
-                                            tint = StarGold,
-                                            modifier = Modifier.size(10.dp)
-                                        )
-                                    }
-                                    Text(
-                                        text = slot.badge,
-                                        fontSize = 8.sp,
-                                        lineHeight = 9.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = if (slot.isLiveSponsored) fgColor else MaterialTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                Text(
-                                    text = slot.title,
-                                    fontSize = 9.5.sp,
-                                    lineHeight = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = fgColor,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
+                                Icon(
+                                    imageVector = if (slide.isLiveSponsored) Icons.Filled.Star else Icons.Filled.Campaign,
+                                    contentDescription = null,
+                                    tint = if (slide.isLiveSponsored) StarGold else Color.White,
+                                    modifier = Modifier.size(13.dp)
                                 )
                                 Text(
-                                    text = slot.subtitle,
-                                    fontSize = 8.sp,
-                                    lineHeight = 9.sp,
-                                    color = fgColor.copy(alpha = 0.75f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    text = "${slide.badge} • ${slideIndex + 1}/${slides.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "Post Ad →",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White.copy(alpha = 0.92f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpenPaidAdverts() }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .testTag("discover_paid_adverts_banner")
+                        )
+                    }
+
+                    // Middle: Single Clean Advert Headline & Subcopy
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = slide.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = slide.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.86f),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // Bottom Row: 10-Dot Progress Strip + Clean CTA Pill
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(slides.size) { dotIdx ->
+                                val isSelected = dotIdx == activeIndex
+                                val dotWidth by animateDpAsState(
+                                    targetValue = if (isSelected) 18.dp else 6.dp,
+                                    animationSpec = tween(250),
+                                    label = "advert_dot_width"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .height(6.dp)
+                                        .width(dotWidth)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isSelected) Color.White else Color.White.copy(alpha = 0.35f)
+                                        )
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White.copy(alpha = 0.22f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = slide.ctaText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(13.dp)
                                 )
                             }
                         }

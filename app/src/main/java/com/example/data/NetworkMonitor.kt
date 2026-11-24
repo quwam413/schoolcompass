@@ -52,25 +52,25 @@ class NetworkMonitor(context: Context) {
         _connectionLabel.value = resolveLabel()
     }
 
-    private fun checkCurrentlyOnline(): Boolean {
+    private fun checkCurrentlyOnline(): Boolean = runCatching {
         val cm = connectivityManager ?: return true
         val active = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(active) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }.getOrDefault(true)
 
-    private fun resolveLabel(): String {
+    private fun resolveLabel(): String = runCatching {
         val cm = connectivityManager ?: return "Online"
         val active = cm.activeNetwork ?: return "Offline"
         val caps = cm.getNetworkCapabilities(active) ?: return "Offline"
         if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return "Offline"
-        return when {
+        when {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi Connected"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile Data Connected"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet Connected"
             else -> "Internet Connected"
         }
-    }
+    }.getOrDefault("Online")
 
     fun unregister() {
         runCatching { connectivityManager?.unregisterNetworkCallback(callback) }

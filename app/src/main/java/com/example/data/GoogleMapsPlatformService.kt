@@ -259,13 +259,23 @@ object GoogleMapsPlatformService {
                 else -> emptyList()
             }
 
+            val sanitizedPlaceId = placeId.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(64).ifEmpty { "place" }
+            val mapsRef = "places/$placeId".take(160)
+            val mapsUrl = "https://www.google.com/maps/place/?q=place_id:$placeId".take(300)
+            val citation = GroundingSourceLink(
+                title = "$name (Google Maps)",
+                uri = mapsUrl,
+                sourceType = "Google Maps",
+                placeId = mapsRef
+            ).toCitationString()
+
             parsed.add(
                 School(
-                    id = "gmaps_${placeId.take(64)}",
+                    id = "gmaps_$sanitizedPlaceId",
                     adminUid = "",
                     adminName = "",
                     name = name.take(100),
-                    description = "Geolocated ${institutionType.lowercase(Locale.US)} discovered via Google Maps Places. Administrators can claim this listing to add full curriculum, courses, fees, and sports.",
+                    description = "Verified online ${institutionType.lowercase(Locale.US)} from Google Maps Places. Parents can browse and inquire immediately; schools or community members can optionally add tuition, admission windows, or photos.",
                     address = vicinity,
                     latitude = lat,
                     longitude = lng,
@@ -291,7 +301,10 @@ object GoogleMapsPlatformService {
                     admissionsOpen = true,
                     externalPlaceId = extId,
                     verificationStatus = "INTERNET_MATCHED",
-                    verificationSource = "Google Maps Places API"
+                    verificationSource = "Google Maps Places API",
+                    sourceCitations = listOf(citation),
+                    googleMapsPlaceRef = mapsRef,
+                    googleMapsUrl = mapsUrl
                 )
             )
         }

@@ -1,9 +1,14 @@
 package com.example.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,11 +18,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
@@ -25,22 +32,21 @@ import androidx.compose.material.icons.filled.LocationSearching
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PinDrop
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,12 +69,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.example.BuildConfig
 import com.example.data.GoogleMapsPlatformService
 import com.example.data.School
 import com.example.data.SchoolConstants
@@ -78,10 +84,6 @@ import com.example.ui.theme.FavoriteHeartColor
 import com.example.ui.theme.StarGold
 import com.example.ui.theme.StatusAbsentRed
 import com.example.ui.theme.StatusPresentGreen
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import com.google.android.gms.maps.MapsInitializer
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.LatLng
@@ -115,6 +117,7 @@ fun DiscoverMapSection(
 ) {
     val context = LocalContext.current
     var mapExpanded by remember { mutableStateOf(false) }
+    var showMapControls by remember { mutableStateOf(false) }
     val hasValidGoogleMapsKey = remember { GoogleMapsPlatformService.hasValidGoogleMapsKey() }
     var useLiveStreetMap by remember(hasValidGoogleMapsKey) { mutableStateOf(!hasValidGoogleMapsKey) }
     var selectedMapType by remember { mutableStateOf(MapType.NORMAL) }
@@ -132,209 +135,238 @@ fun DiscoverMapSection(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // GPS + Preset Location Picker Strip
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            item {
-                OutlinedButton(
-                    onClick = onRequestGpsCenter,
-                    modifier = Modifier.testTag("gps_location_button")
-                ) {
-                    Icon(
-                        imageVector = if (isLocatingUser) Icons.Filled.LocationSearching else Icons.Filled.MyLocation,
-                        contentDescription = "Center on my GPS location",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(if (isLocatingUser) "Locating…" else "My GPS")
-                }
-            }
-            items(SchoolConstants.PRESET_LOCATIONS) { preset ->
-                FilterChip(
-                    selected = filter.centerLabel == preset.label,
-                    onClick = {
-                        onUpdateFilter {
-                            it.copy(
-                                centerLat = preset.lat,
-                                centerLng = preset.lng,
-                                centerLabel = preset.label,
-                                lockToNigeria = GoogleMapsPlatformService.isInsideNigeriaBounds(preset.lat, preset.lng)
-                            )
-                        }
-                    },
-                    label = { Text(preset.label) }
-                )
-            }
-        }
-
-        // Map Engine Switcher & Live Internet Status Row
+        // Minimalist Map Header Bar
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                FilterChip(
-                    selected = useLiveStreetMap,
-                    onClick = { useLiveStreetMap = true },
-                    leadingIcon = { Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(15.dp)) },
-                    label = { Text("OpenStreetMap") },
-                    modifier = Modifier.testTag("map_engine_osm_chip")
-                )
-                FilterChip(
-                    selected = !useLiveStreetMap,
-                    onClick = { useLiveStreetMap = false },
-                    leadingIcon = { Icon(Icons.Filled.Map, contentDescription = null, modifier = Modifier.size(15.dp)) },
-                    label = { Text("Google Maps") },
-                    modifier = Modifier.testTag("map_engine_google_chip")
-                )
-            }
-            Surface(
-                shape = MaterialTheme.shapes.small,
-                color = if (isNetworkOnline) StatusPresentGreen.copy(alpha = 0.14f) else StatusAbsentRed.copy(alpha = 0.14f)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isNetworkOnline) Icons.Filled.Wifi else Icons.Filled.WifiOff,
-                        contentDescription = connectionLabel,
-                        tint = if (isNetworkOnline) StatusPresentGreen else StatusAbsentRed,
-                        modifier = Modifier.size(14.dp)
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (isNetworkOnline) StatusPresentGreen else StatusAbsentRed)
+                )
+                Column {
+                    Text(
+                        text = filter.centerLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (isNetworkOnline) "Online" else "Offline",
+                        text = if (isNetworkOnline) "Live Map • ${if (useLiveStreetMap) "OpenStreetMap" else "Google Maps"}" else "Offline • Cached directory",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (isNetworkOnline) StatusPresentGreen else StatusAbsentRed,
-                        fontWeight = FontWeight.SemiBold
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                FilterChip(
+                    selected = filter.centerLabel == "Current GPS",
+                    onClick = onRequestGpsCenter,
+                    leadingIcon = {
+                        Icon(
+                            imageVector = if (isLocatingUser) Icons.Filled.LocationSearching else Icons.Filled.MyLocation,
+                            contentDescription = "Center on my GPS location",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    label = { Text(if (isLocatingUser) "Locating…" else "My GPS") },
+                    modifier = Modifier.testTag("gps_location_button")
+                )
+                FilterChip(
+                    selected = showMapControls,
+                    onClick = { showMapControls = !showMapControls },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Filled.Tune,
+                            contentDescription = "Toggle area & map layer options",
+                            modifier = Modifier.size(15.dp)
+                        )
+                    },
+                    label = { Text("Area") },
+                    modifier = Modifier.testTag("toggle_map_controls_button")
+                )
+            }
         }
 
-        // Nigeria-Scoped Nominatim / Google Maps Place Search Input
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = addressQuery,
-                onValueChange = { addressQuery = it },
-                leadingIcon = { Icon(Icons.Filled.PinDrop, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                placeholder = {
-                    Text(
-                        if (filter.lockToNigeria) "Search a place in Nigeria (e.g. Ikorodu, Abuja)…"
-                        else "Jump map to area, city or address…"
-                    )
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(
-                    onSearch = {
-                        if (addressQuery.trim().length >= 2) {
-                            onGeocodeSearch(addressQuery.trim())
+        // Collapsible Area, Map Engine & Place Search Controls (kept tucked away until needed)
+        AnimatedVisibility(visible = showMapControls) {
+            Surface(
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(SchoolConstants.PRESET_LOCATIONS) { preset ->
+                            FilterChip(
+                                selected = filter.centerLabel == preset.label,
+                                onClick = {
+                                    onUpdateFilter {
+                                        it.copy(
+                                            centerLat = preset.lat,
+                                            centerLng = preset.lng,
+                                            centerLabel = preset.label,
+                                            lockToNigeria = GoogleMapsPlatformService.isInsideNigeriaBounds(preset.lat, preset.lng)
+                                        )
+                                    }
+                                },
+                                label = { Text(preset.label) }
+                            )
                         }
                     }
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("map_geocode_input")
-            )
-            Button(
-                onClick = { onGeocodeSearch(addressQuery.trim()) },
-                enabled = !isGeocodingLocation && addressQuery.trim().length >= 2,
-                modifier = Modifier
-                    .height(50.dp)
-                    .testTag("map_geocode_button")
-            ) {
-                if (isGeocodingLocation) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                } else {
-                    Text("Search")
-                }
-            }
-        }
 
-        // OpenStreetMap Nigeria Bounds & State Boundaries Strip vs Google Maps Layers
-        if (useLiveStreetMap) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                item {
-                    FilterChip(
-                        selected = filter.showNigeriaStates,
-                        onClick = { onUpdateFilter { it.copy(showNigeriaStates = !it.showNigeriaStates) } },
-                        leadingIcon = { Icon(Icons.Filled.Layers, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                        label = { Text("Nigeria States") },
-                        modifier = Modifier.testTag("map_nigeria_states_chip")
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = filter.lockToNigeria,
-                        onClick = { onUpdateFilter { it.copy(lockToNigeria = !it.lockToNigeria) } },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = if (filter.lockToNigeria) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        },
-                        label = { Text(if (filter.lockToNigeria) "Nigeria Bounds" else "Global Bounds") },
-                        modifier = Modifier.testTag("map_nigeria_lock_chip")
-                    )
-                }
-                item {
-                    OutlinedButton(
-                        onClick = {
-                            onUpdateFilter { it.copy(lockToNigeria = true) }
-                            fitNigeriaOverviewTick++
-                        },
-                        modifier = Modifier.testTag("map_fit_nigeria_button")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("All Nigeria")
+                        OutlinedTextField(
+                            value = addressQuery,
+                            onValueChange = { addressQuery = it },
+                            leadingIcon = { Icon(Icons.Filled.PinDrop, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            placeholder = {
+                                Text(
+                                    if (filter.lockToNigeria) "Jump to area in Nigeria (e.g. Ikorodu)…"
+                                    else "Jump map to area, city or address…"
+                                )
+                            },
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.medium,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(
+                                onSearch = {
+                                    if (addressQuery.trim().length >= 2) {
+                                        onGeocodeSearch(addressQuery.trim())
+                                    }
+                                }
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("map_geocode_input")
+                        )
+                        Button(
+                            onClick = { onGeocodeSearch(addressQuery.trim()) },
+                            enabled = !isGeocodingLocation && addressQuery.trim().length >= 2,
+                            modifier = Modifier
+                                .height(50.dp)
+                                .testTag("map_geocode_button")
+                        ) {
+                            if (isGeocodingLocation) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Text("Go")
+                            }
+                        }
                     }
-                }
-            }
-        } else {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items(
-                    listOf(
-                        MapType.NORMAL to "Normal",
-                        MapType.HYBRID to "Hybrid",
-                        MapType.SATELLITE to "Satellite",
-                        MapType.TERRAIN to "Terrain"
-                    )
-                ) { (mapType, label) ->
-                    FilterChip(
-                        selected = selectedMapType == mapType,
-                        onClick = { selectedMapType = mapType },
-                        leadingIcon = { Icon(Icons.Filled.Layers, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                        label = { Text(label) },
-                        modifier = Modifier.testTag("gmap_type_${label.lowercase()}")
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = trafficEnabled,
-                        onClick = { trafficEnabled = !trafficEnabled },
-                        leadingIcon = { Icon(Icons.Filled.DirectionsCar, contentDescription = null, modifier = Modifier.size(14.dp)) },
-                        label = { Text("Traffic") },
-                        modifier = Modifier.testTag("gmap_traffic_chip")
-                    )
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        item {
+                            FilterChip(
+                                selected = useLiveStreetMap,
+                                onClick = { useLiveStreetMap = true },
+                                leadingIcon = { Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                label = { Text("OpenStreetMap") },
+                                modifier = Modifier.testTag("map_engine_osm_chip")
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = !useLiveStreetMap,
+                                onClick = { useLiveStreetMap = false },
+                                leadingIcon = { Icon(Icons.Filled.Map, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                label = { Text("Google Maps") },
+                                modifier = Modifier.testTag("map_engine_google_chip")
+                            )
+                        }
+                        if (useLiveStreetMap) {
+                            item {
+                                FilterChip(
+                                    selected = filter.showNigeriaStates,
+                                    onClick = { onUpdateFilter { it.copy(showNigeriaStates = !it.showNigeriaStates) } },
+                                    leadingIcon = { Icon(Icons.Filled.Layers, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                    label = { Text("States") },
+                                    modifier = Modifier.testTag("map_nigeria_states_chip")
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = filter.lockToNigeria,
+                                    onClick = { onUpdateFilter { it.copy(lockToNigeria = !it.lockToNigeria) } },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = if (filter.lockToNigeria) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    },
+                                    label = { Text(if (filter.lockToNigeria) "Nigeria" else "Global") },
+                                    modifier = Modifier.testTag("map_nigeria_lock_chip")
+                                )
+                            }
+                            item {
+                                OutlinedButton(
+                                    onClick = {
+                                        onUpdateFilter { it.copy(lockToNigeria = true) }
+                                        fitNigeriaOverviewTick++
+                                    },
+                                    modifier = Modifier.testTag("map_fit_nigeria_button")
+                                ) {
+                                    Text("Fit Nigeria")
+                                }
+                            }
+                        } else {
+                            items(
+                                listOf(
+                                    MapType.NORMAL to "Normal",
+                                    MapType.HYBRID to "Hybrid",
+                                    MapType.SATELLITE to "Satellite",
+                                    MapType.TERRAIN to "Terrain"
+                                )
+                            ) { (mapType, label) ->
+                                FilterChip(
+                                    selected = selectedMapType == mapType,
+                                    onClick = { selectedMapType = mapType },
+                                    label = { Text(label) },
+                                    modifier = Modifier.testTag("gmap_type_${label.lowercase()}")
+                                )
+                            }
+                            item {
+                                FilterChip(
+                                    selected = trafficEnabled,
+                                    onClick = { trafficEnabled = !trafficEnabled },
+                                    leadingIcon = { Icon(Icons.Filled.DirectionsCar, contentDescription = null, modifier = Modifier.size(14.dp)) },
+                                    label = { Text("Traffic") },
+                                    modifier = Modifier.testTag("gmap_traffic_chip")
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -346,7 +378,7 @@ fun DiscoverMapSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Location permission is off. Select an area above or tap anywhere on the map to set your search center.",
+                    text = "Location permission is off. Select an area or tap anywhere on the map to set your search center.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -361,7 +393,7 @@ fun DiscoverMapSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Google Maps SDK requires a MAPS_API_KEY in AI Studio Secrets. Switch to OpenStreetMap for instant interactive Leaflet map tiles.",
+                    text = "Google Maps SDK requires a MAPS_API_KEY in AI Studio Secrets. Switch to OpenStreetMap inside Area options for instant tiles.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
@@ -369,14 +401,16 @@ fun DiscoverMapSection(
             }
         }
 
-        // Integrated Map Viewport (Live Internet Street Map or Google Maps SDK)
-        Box(
+        // Integrated Minimalist Map Viewport
+        Surface(
+            shape = MaterialTheme.shapes.large,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize()
-                .height(if (mapExpanded) 380.dp else 270.dp)
-                .clip(MaterialTheme.shapes.large)
+                .height(if (mapExpanded) 360.dp else 232.dp)
         ) {
+            Box(modifier = Modifier.fillMaxSize()) {
             if (useLiveStreetMap) {
                 InternetStreetMapView(
                     filter = filter,
@@ -456,7 +490,7 @@ fun DiscoverMapSection(
                         val snippetText = if (isRegistered) {
                             "${s.institutionType} • ${s.curriculum} • ${s.formattedFeeRange()} • ${String.format("%.1f", item.distanceKm)} km"
                         } else {
-                            "${s.institutionType} (Map Listing) • ${String.format("%.1f", item.distanceKm)} km • Tap to Claim"
+                            "${s.institutionType} (${s.verificationBadgeLabel()}) • ${String.format("%.1f", item.distanceKm)} km"
                         }
                         Marker(
                             state = MarkerState(position = LatLng(s.latitude, s.longitude)),
@@ -534,8 +568,9 @@ fun DiscoverMapSection(
                 }
             }
         }
+        }
 
-        // Dedicated Current-Location Kilometer Search Radius Component
+        // Dedicated Minimalist Kilometer Search Radius Card
         RadiusFilterCard(
             filter = filter,
             matchCount = filteredSchools.size,
@@ -558,14 +593,14 @@ fun RadiusFilterCard(
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("map_radius_filter_component")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -581,10 +616,10 @@ fun RadiusFilterCard(
                             imageVector = if (isCenteredOnGps) Icons.Filled.MyLocation else Icons.Filled.LocationOn,
                             contentDescription = null,
                             tint = if (isCenteredOnGps) StatusPresentGreen else MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = "Location & Search Radius",
+                            text = if (filter.limitByRadius) "Radius • ${filter.radiusKm} km" else "All Distances",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold
                         )
@@ -595,59 +630,25 @@ fun RadiusFilterCard(
                         } else {
                             "$matchCount markers shown across all distances from ${filter.centerLabel}"
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = if (filter.limitByRadius) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Text(
-                        text = if (filter.limitByRadius) "${filter.radiusKm} km" else "All km",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = if (filter.limitByRadius) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            // Current Location Sync + Filter Toggle Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = onRequestGpsCenter,
-                    modifier = Modifier.testTag("radius_use_my_location_button")
-                ) {
-                    Icon(
-                        imageVector = if (isLocatingUser) Icons.Filled.LocationSearching else Icons.Filled.MyLocation,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text(
-                        text = when {
-                            isLocatingUser -> "Getting Current Location…"
-                            isCenteredOnGps -> "Centered on My Location"
-                            else -> "Filter From My Location"
-                        }
                     )
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = "Filter markers",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    TextButton(
+                        onClick = onRequestGpsCenter,
+                        modifier = Modifier.testTag("radius_use_my_location_button")
+                    ) {
+                        Text(
+                            text = if (isLocatingUser) "Locating…" else if (isCenteredOnGps) "My GPS" else "Use GPS",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
                     Switch(
                         checked = filter.limitByRadius,
                         onCheckedChange = { enabled ->
@@ -675,18 +676,7 @@ fun RadiusFilterCard(
                     .testTag("discover_radius_slider")
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("2 km", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("50 km", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("100 km", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(listOf(2, 5, 10, 15, 25, 50, 100)) { km ->
                     FilterChip(
                         selected = filter.limitByRadius && filter.radiusKm == km,
@@ -706,28 +696,37 @@ fun SchoolResultCard(
     item: SchoolWithDistance,
     isFavorite: Boolean = false,
     onToggleFavorite: (School) -> Unit = {},
+    onSubmitExtraDetails: (School) -> Unit = {},
+    onClaimSchool: (School) -> Unit = {},
     onClick: () -> Unit
 ) {
     val s = item.school
+    val uriHandler = LocalUriHandler.current
+    val citations = remember(s.sourceCitations, s.googleMapsUrl, s.websiteUrl) { s.parsedCitations() }
+
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        tonalElevation = 1.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("school_card_${s.id}")
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Top Header: Title, Location & Favorite Action
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     Text(
                         text = s.name,
                         style = MaterialTheme.typography.titleMedium,
@@ -736,197 +735,174 @@ fun SchoolResultCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "${s.address} • ${String.format("%.1f", item.distanceKm)} km away",
+                        text = "${s.address} • ${String.format("%.1f", item.distanceKm)} km",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                IconButton(
+                    onClick = { onToggleFavorite(s) },
+                    modifier = Modifier
+                        .size(48.dp)
+                        .testTag("card_favorite_button_${s.id}")
                 ) {
-                    Column(horizontalAlignment = Alignment.End) {
-                        if (s.hasPlatformAdmin()) {
-                            Surface(
-                                shape = MaterialTheme.shapes.extraSmall,
-                                color = MaterialTheme.colorScheme.primaryContainer
-                            ) {
-                                Text(
-                                    text = "#${s.districtRank} • ${s.rankingScore.toInt()}pts",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                                modifier = Modifier.padding(top = 4.dp)
-                            ) {
-                                Icon(Icons.Filled.Star, contentDescription = null, tint = StarGold, modifier = Modifier.size(14.dp))
-                                Text("${s.rating}", style = MaterialTheme.typography.labelSmall)
-                            }
-                        } else {
-                            Surface(
-                                shape = MaterialTheme.shapes.extraSmall,
-                                color = MaterialTheme.colorScheme.tertiaryContainer
-                            ) {
-                                Text(
-                                    text = "Map Listing",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
-                    IconButton(
-                        onClick = { onToggleFavorite(s) },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("card_favorite_button_${s.id}")
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove ${s.name} from favorites" else "Save ${s.name} to favorites",
+                        tint = if (isFavorite) FavoriteHeartColor else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Concise Verification & Key Attributes Strip (max 3–4 clean pills)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (s.isVerifiedOnline()) StatusPresentGreen.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-                            contentDescription = if (isFavorite) "Remove ${s.name} from favorites" else "Save ${s.name} to favorites",
-                            tint = if (isFavorite) FavoriteHeartColor else MaterialTheme.colorScheme.onSurfaceVariant
+                        if (s.isVerifiedOnline()) {
+                            Icon(
+                                imageVector = Icons.Filled.Verified,
+                                contentDescription = null,
+                                tint = StatusPresentGreen,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                        Text(
+                            text = if (s.hasPlatformAdmin()) {
+                                "${s.verificationBadgeLabel()} • #${s.districtRank}"
+                            } else {
+                                s.verificationBadgeLabel()
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (s.isVerifiedOnline()) StatusPresentGreen else MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
-            }
-
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (s.hasPlatformAdmin()) {
-                    AttributeBadge(
-                        text = s.verificationBadgeLabel(),
-                        containerColor = if (s.verificationStatus == "VERIFIED") {
-                            StatusPresentGreen.copy(alpha = 0.16f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        contentColor = if (s.verificationStatus == "VERIFIED") {
-                            StatusPresentGreen
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                    )
-                } else {
-                    AttributeBadge(
-                        text = "Not Registered Yet • Tap to Claim",
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                }
                 AttributeBadge(
                     text = s.institutionType,
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurface
                 )
                 AttributeBadge(
                     text = s.curriculum,
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                AttributeBadge(
-                    text = if (s.faithBased) "Faith (${s.faithTradition})" else "Secular",
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                if (s.specialSchool) {
-                    AttributeBadge(
-                        text = "Special Ed School",
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                }
-                AttributeBadge(
-                    text = s.studentMix,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (!s.boardingOption.isNullOrBlank() && s.boardingOption != "Not Specified") {
+                    AttributeBadge(
+                        text = s.boardingOption,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
+            // Fee + Admission Status + Verified Source Line
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(
-                        Icons.Filled.AttachMoney,
-                        contentDescription = null,
-                        tint = if (s.hasPlatformAdmin()) StatusPresentGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp)
-                    )
+                Text(
+                    text = s.formattedFeeRange(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (s.feeMin > 0L || s.hasPlatformAdmin()) StatusPresentGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (s.hasPlatformAdmin()) {
+                        Icon(Icons.Filled.Star, contentDescription = null, tint = StarGold, modifier = Modifier.size(14.dp))
+                        Text("${s.rating}", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                    }
                     Text(
-                        text = s.formattedFeeRange(),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (s.hasPlatformAdmin()) StatusPresentGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold
+                        text = s.admissionWindow?.takeIf { it.isNotBlank() }
+                            ?: if (s.admissionsOpen) "Admissions Open" else "Closed",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (s.admissionsOpen) StatusPresentGreen else MaterialTheme.colorScheme.error
                     )
                 }
+            }
+
+            // Minimal Program / Source Summary
+            val summaryText = when {
+                s.gradeLevels.isNotEmpty() -> s.gradeLevels.joinToString(" • ")
+                s.coursesOffered.isNotEmpty() -> s.coursesOffered.take(3).joinToString(" • ")
+                s.isVerifiedOnline() -> s.primarySourceSummary()
+                else -> ""
+            }
+            if (summaryText.isNotBlank()) {
                 Text(
-                    text = when {
-                        !s.hasPlatformAdmin() -> "Unclaimed Geo Pin"
-                        s.admissionsOpen -> "Admissions Open"
-                        else -> "Closed"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = when {
-                        !s.hasPlatformAdmin() -> MaterialTheme.colorScheme.tertiary
-                        s.admissionsOpen -> StatusPresentGreen
-                        else -> MaterialTheme.colorScheme.error
-                    }
+                    text = summaryText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            if (s.gradeLevels.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Filled.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
-                    Text(
-                        text = "Programmes: ${s.gradeLevels.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+            if (citations.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(citations.take(2)) { link ->
+                        FilterChip(
+                            selected = false,
+                            onClick = { runCatching { uriHandler.openUri(link.uri) } },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (link.sourceType == "Google Maps") Icons.Filled.Map else Icons.Filled.Public,
+                                    contentDescription = "Open ${link.sourceType} link",
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = "${link.sourceType}: ${link.title}",
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        )
+                    }
                 }
             }
 
-            if (s.coursesOffered.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(15.dp))
-                    val previewCourses = s.coursesOffered.take(4).joinToString(", ")
-                    val suffix = if (s.coursesOffered.size > 4) " +${s.coursesOffered.size - 4} more" else ""
-                    Text(
-                        text = "Courses: $previewCourses$suffix",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
-            if (s.sportsFocus.isNotEmpty()) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+            // Lightweight Optional Actions Footer
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = { onSubmitExtraDetails(s) },
+                    modifier = Modifier.testTag("card_submit_details_${s.id}")
                 ) {
-                    Icon(Icons.Filled.SportsSoccer, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(15.dp))
-                    Text(
-                        text = "Sports: ${s.sportsFocus.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Icon(Icons.Filled.EditNote, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.size(4.dp))
+                    Text("Submit More Details", style = MaterialTheme.typography.labelMedium)
+                }
+                if (!s.hasPlatformAdmin()) {
+                    TextButton(
+                        onClick = { onClaimSchool(s) },
+                        modifier = Modifier.testTag("card_claim_school_${s.id}")
+                    ) {
+                        Text("Claim Profile", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }

@@ -87,13 +87,15 @@ fun ProgressiveTutorsScreen(
     clientSessionsState: UiState<List<TutorSession>>,
     teacherSessionsState: UiState<List<TutorSession>>,
     isBusy: Boolean,
+    onlineTutorsLoading: Boolean = false,
+    onlineTutorsError: String? = null,
     onUpdateFilter: ((TutorSearchFilter) -> TutorSearchFilter) -> Unit,
     onResetFilters: () -> Unit,
     onSaveTutorProfile: (ProgressiveTutor, Boolean) -> Unit,
     onBookSession: (ProgressiveTutor, String, String, String, String, String?, Int, PaymentSubmissionDraft?) -> Unit,
     onPayForSession: (TutorSession, Long, String, PaymentSubmissionDraft) -> Unit = { _, _, _, _ -> },
     onUpdateSessionStatus: (TutorSession, String, String?) -> Unit,
-    onSeedSampleTutors: () -> Unit
+    onDiscoverOnlineTutors: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
@@ -208,7 +210,18 @@ fun ProgressiveTutorsScreen(
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.size(6.dp))
-                            Text("Offer Tutoring Session")
+                            Text("Offer Tutoring", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        OutlinedButton(
+                            onClick = onDiscoverOnlineTutors,
+                            enabled = !onlineTutorsLoading,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("discover_online_tutors_button")
+                        ) {
+                            Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text(if (onlineTutorsLoading) "Searching…" else "Find via Google", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -453,14 +466,19 @@ fun ProgressiveTutorsScreen(
                 }
                 is UiState.Error -> item { ErrorBanner(tutorsUiState.message) }
                 is UiState.Success -> {
-                    if (tutorsUiState.data.isEmpty()) {
+                    if (onlineTutorsError != null) {
+                        item {
+                            ErrorBanner("Online tutor search notice: $onlineTutorsError")
+                        }
+                    }
+                    if (tutorsUiState.data.isEmpty() && filteredTutors.isEmpty()) {
                         item {
                             EmptyStateCard(
                                 icon = Icons.Filled.CastForEducation,
-                                title = "No Progressive Tutors listed yet",
-                                subtitle = "Teachers can publish online Cambridge & Nigerian tutoring sessions, or load sample tutors around ${filter.clientLabel}.",
-                                actionLabel = if (isBusy) "Loading…" else "Load Sample Tutors",
-                                onAction = { if (!isBusy) onSeedSampleTutors() }
+                                title = "Discover real tutors near ${filter.clientLabel}",
+                                subtitle = "Search Google Search & Maps for verified Cambridge & Nigerian tutoring centres or publish your own tutoring profile.",
+                                actionLabel = if (onlineTutorsLoading) "Searching Google…" else "Find Real Tutors via Google",
+                                onAction = { if (!onlineTutorsLoading) onDiscoverOnlineTutors() }
                             )
                         }
                     } else if (filteredTutors.isEmpty()) {
@@ -477,8 +495,9 @@ fun ProgressiveTutorsScreen(
                         items(filteredTutors, key = { it.tutor.id }) { item ->
                             TutorCard(
                                 item = item,
-                                isOwner = item.tutor.teacherUid == currentUserId,
+                                isOwner = item.tutor.teacherUid == currentUserId && currentUserId.isNotBlank(),
                                 onBookSession = { bookingTutor = item.tutor },
+                                onOpenExternalUrl = { url -> runCatching { uriHandler.openUri(url) } },
                                 onEditProfile = {
                                     editingTutor = item.tutor
                                     showTutorEditor = true
@@ -617,9 +636,11 @@ private fun TutorCard(
     item: TutorWithDistance,
     isOwner: Boolean,
     onBookSession: () -> Unit,
+    onOpenExternalUrl: (String) -> Unit,
     onEditProfile: () -> Unit
 ) {
     val t = item.tutor
+    val isOnlineVerifiedOnly = t.isVerifiedOnlineOnly()
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -661,25 +682,51 @@ private fun TutorCard(
             }
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (isOnlineVerifiedOnly) {
+                    AttributeBadge(
+                        text = "Verified Online",
+                        containerColor = StatusPresentGreen.copy(alpha = 0.14f),
+                        contentColor = StatusPresentGreen
+                    )
+                } else {
+                    AttributeBadge(
+                        text = t.sex,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
                 AttributeBadge(
-                    text = t.sex,
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                AttributeBadge(
-                    text = "Online: ${t.meetingPlatform}",
+                    text = t.meetingPlatform,
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
-                AttributeBadge(
-                    text = "${t.yearsExperience} yrs exp",
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (!isOnlineVerifiedOnly) {
+                    AttributeBadge(
+                        text = "${t.yearsExperience} yrs exp",
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             if (t.bio.isNotBlank()) {
                 Text(t.bio, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            if (!t.verificationSource.isNullOrBlank()) {
+                Text(
+                    text = "Source: ${t.verificationSource}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (!t.contactPhone.isNullOrBlank()) {
+                Text(
+                    text = "Phone: ${t.contactPhone}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StatusPresentGreen
+                )
             }
 
             if (t.cambridgeSubjects.isNotEmpty()) {
@@ -720,15 +767,37 @@ private fun TutorCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
-                    onClick = onBookSession,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("book_tutor_${t.id}")
-                ) {
-                    Icon(Icons.Filled.VideoCall, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Book Online Session")
+                if (!isOnlineVerifiedOnly) {
+                    Button(
+                        onClick = onBookSession,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("book_tutor_${t.id}")
+                    ) {
+                        Icon(Icons.Filled.VideoCall, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Book Online Session")
+                    }
+                } else {
+                    val primaryUrl = t.websiteUrl ?: t.googleMapsUrl
+                    if (!primaryUrl.isNullOrBlank()) {
+                        Button(
+                            onClick = { onOpenExternalUrl(primaryUrl) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("open_tutor_source_${t.id}")
+                        ) {
+                            Text(if (t.websiteUrl != null) "Visit Website" else "Open Google Maps")
+                        }
+                    }
+                    if (!t.googleMapsUrl.isNullOrBlank() && t.websiteUrl != null) {
+                        OutlinedButton(
+                            onClick = { onOpenExternalUrl(t.googleMapsUrl) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Google Maps")
+                        }
+                    }
                 }
                 if (isOwner) {
                     OutlinedButton(onClick = onEditProfile) {

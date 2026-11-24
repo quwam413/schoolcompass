@@ -356,10 +356,272 @@ class SchoolRepository(
         }
     }
 
+    suspend fun toggleFavoriteSchool(school: School, currentlyFavorite: Boolean): Result<Boolean> {
+        if (!currentlyFavorite) {
+            val persistedId = ensureSchoolPersisted(school).getOrElse { return Result.failure(it) }
+            return toggleFavoriteSchool(persistedId, false)
+        }
+        return toggleFavoriteSchool(school.id, true)
+    }
+
+    private fun resolveFirestoreSchoolId(school: School): String {
+        val raw = school.id.trim()
+        if (raw.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))) {
+            return raw
+        }
+        val ext = school.externalPlaceId?.trim()?.takeIf { it.isNotEmpty() }
+        if (ext != null) {
+            return ExternalSchoolService.claimSchoolDocId(ext)
+        }
+        val slug = school.name.lowercase()
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+            .take(40)
+            .ifEmpty { "school" }
+        return "web_${slug}_${kotlin.math.abs(school.name.hashCode())}".take(120)
+    }
+
+    private fun sanitizeValidUrlList(urls: List<String>, maxItems: Int, maxLen: Int): List<String> {
+        return urls.map { it.trim() }
+            .filter {
+                (it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)) &&
+                    it.length <= maxLen
+            }
+            .distinct()
+            .take(maxItems)
+    }
+
+    private fun buildUnclaimedVerifiedPayload(school: School): Map<String, Any> {
+        val safeFeeMin = school.feeMin.coerceIn(0L, 50_000_000L)
+        val safeFeeMax = school.feeMax.coerceAtLeast(safeFeeMin).coerceAtMost(100_000_000L)
+        val safeCapacity = school.capacity.coerceIn(1L, 10_000L)
+        val safeEnrolled = school.enrolledCount.coerceIn(0L, safeCapacity)
+        val safeStatus = when (school.verificationStatus) {
+            "VERIFIED_ONLINE", "INTERNET_MATCHED" -> school.verificationStatus
+            else -> "VERIFIED_ONLINE"
+        }
+        val payload = mutableMapOf<String, Any>(
+            "adminUid" to "",
+            "adminName" to "",
+            "name" to school.name.trim().ifEmpty { "Verified School" }.take(100),
+            "description" to school.description.trim().take(800),
+            "address" to school.address.trim().ifEmpty { "Nigeria" }.take(200),
+            "latitude" to school.latitude.coerceIn(-90.0, 90.0),
+            "longitude" to school.longitude.coerceIn(-180.0, 180.0),
+            "curriculum" to school.curriculum.takeIf { it in SchoolConstants.CURRICULA }.orEmpty().ifEmpty { "Nigerian & British" },
+            "institutionType" to school.institutionType.takeIf { it in SchoolConstants.INSTITUTION_TYPES }.orEmpty().ifEmpty { "Primary & Secondary" },
+            "faithBased" to school.faithBased,
+            "faithTradition" to school.faithTradition.trim().ifEmpty { if (school.faithBased) "Christian" else "Secular" }.take(60),
+            "specialSchool" to school.specialSchool,
+            "specialNeedsSupport" to school.specialNeedsSupport.trim().ifEmpty { if (school.specialSchool) "Dedicated Special Needs School" else "General Education" }.take(120),
+            "studentMix" to school.studentMix.takeIf { it in SchoolConstants.STUDENT_MIX_OPTIONS }.orEmpty().ifEmpty { "Mixed" },
+            "gradeLevels" to school.gradeLevels.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(10),
+            "coursesOffered" to school.coursesOffered.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(25),
+            "activities" to school.activities.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(15),
+            "sportsFocus" to school.sportsFocus.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(12),
+            "feeMin" to safeFeeMin,
+            "feeMax" to safeFeeMax,
+            "feeCurrency" to school.feeCurrency.takeIf { it in SchoolConstants.FEE_CURRENCIES }.orEmpty().ifEmpty { "NGN" },
+            "feePeriod" to school.feePeriod.takeIf { it in SchoolConstants.FEE_PERIODS }.orEmpty().ifEmpty { "Per Term" },
+            "rankingScore" to school.rankingScore.coerceIn(0.0, 100.0),
+            "districtRank" to school.districtRank.coerceIn(1L, 9999L),
+            "rating" to school.rating.coerceIn(1.0, 5.0),
+            "tuitionTier" to school.tuitionTier.takeIf { it in SchoolConstants.TUITION_TIERS }.orEmpty().ifEmpty { "$$" },
+            "capacity" to safeCapacity,
+            "enrolledCount" to safeEnrolled,
+            "admissionsOpen" to school.admissionsOpen,
+            "verificationStatus" to safeStatus,
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        school.contactPhone?.trim()?.takeIf { it.isNotEmpty() }?.take(40)?.let { payload["contactPhone"] = it }
+        school.externalPlaceId?.trim()?.takeIf { it.isNotEmpty() }?.take(128)?.let { payload["externalPlaceId"] = it }
+        ExternalSchoolService.normalizeWebsiteUrl(school.websiteUrl)?.take(200)?.let { payload["websiteUrl"] = it }
+        school.verificationSource?.trim()?.takeIf { it.isNotEmpty() }?.take(160)?.let { payload["verificationSource"] = it }
+        val citations = school.sourceCitations.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 350 }.distinct().take(12)
+        if (citations.isNotEmpty()) payload["sourceCitations"] = citations
+        school.googleMapsPlaceRef?.trim()?.takeIf { it.isNotEmpty() }?.take(160)?.let { payload["googleMapsPlaceRef"] = it }
+        ExternalSchoolService.normalizeWebsiteUrl(school.googleMapsUrl)?.take(300)?.let { payload["googleMapsUrl"] = it }
+        school.admissionWindow?.trim()?.takeIf { it.isNotEmpty() }?.take(120)?.let { payload["admissionWindow"] = it }
+        school.boardingOption?.takeIf { it in SchoolConstants.BOARDING_OPTIONS }?.let { payload["boardingOption"] = it }
+        val photos = sanitizeValidUrlList(school.photoUrls, 8, 300)
+        if (photos.isNotEmpty()) payload["photoUrls"] = photos
+        school.extraNotes?.trim()?.takeIf { it.isNotEmpty() }?.take(600)?.let { payload["extraNotes"] = it }
+        school.lastEnrichedByName?.trim()?.takeIf { it.isNotEmpty() }?.take(80)?.let { payload["lastEnrichedByName"] = it }
+        return payload
+    }
+
+    suspend fun ensureSchoolPersisted(school: School): Result<String> {
+        val docId = resolveFirestoreSchoolId(school)
+        val docPath = "schools/$docId"
+        return try {
+            requireUserId()
+            val docRef = db.collection("schools").document(docId)
+            val snap = docRef.get().await()
+            if (!snap.exists()) {
+                val payload = buildUnclaimedVerifiedPayload(school.copy(id = docId))
+                docRef.set(payload).await()
+            }
+            Result.success(docId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun upsertDiscoveredOnlineSchools(schools: List<School>): Result<Unit> {
+        if (schools.isEmpty()) return Result.success(Unit)
+        var lastPath = "schools"
+        return try {
+            requireUserId()
+            for (raw in schools.take(15)) {
+                if (raw.name.trim().length < 2 || raw.address.trim().length < 2) continue
+                val docId = resolveFirestoreSchoolId(raw)
+                val docRef = db.collection("schools").document(docId)
+                lastPath = docRef.path
+                val snap = docRef.get().await()
+                if (!snap.exists()) {
+                    docRef.set(buildUnclaimedVerifiedPayload(raw.copy(id = docId))).await()
+                } else {
+                    val existingAdmin = snap.getString("adminUid").orEmpty()
+                    if (existingAdmin.isBlank()) {
+                        val updates = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+                        val freshCitations = raw.sourceCitations.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 350 }
+                        if (freshCitations.isNotEmpty()) {
+                            val existingCitations = (snap.get("sourceCitations") as? List<*>)
+                                ?.mapNotNull { it as? String }.orEmpty()
+                            val combined = (existingCitations + freshCitations).distinct().take(12)
+                            if (combined != existingCitations) {
+                                updates["sourceCitations"] = combined
+                            }
+                        }
+                        if (snap.getString("googleMapsPlaceRef").isNullOrBlank() && !raw.googleMapsPlaceRef.isNullOrBlank()) {
+                            updates["googleMapsPlaceRef"] = raw.googleMapsPlaceRef.trim().take(160)
+                        }
+                        if (snap.getString("googleMapsUrl").isNullOrBlank() && !raw.googleMapsUrl.isNullOrBlank()) {
+                            ExternalSchoolService.normalizeWebsiteUrl(raw.googleMapsUrl)?.take(300)?.let {
+                                updates["googleMapsUrl"] = it
+                            }
+                        }
+                        if (snap.getString("websiteUrl").isNullOrBlank() && !raw.websiteUrl.isNullOrBlank()) {
+                            ExternalSchoolService.normalizeWebsiteUrl(raw.websiteUrl)?.take(200)?.let {
+                                updates["websiteUrl"] = it
+                            }
+                        }
+                        if (snap.getString("contactPhone").isNullOrBlank() && !raw.contactPhone.isNullOrBlank()) {
+                            updates["contactPhone"] = raw.contactPhone.trim().take(40)
+                        }
+                        if (snap.getString("verificationStatus") != "VERIFIED" && raw.verificationStatus == "VERIFIED_ONLINE") {
+                            updates["verificationStatus"] = "VERIFIED_ONLINE"
+                            raw.verificationSource?.trim()?.takeIf { it.isNotEmpty() }?.take(160)?.let {
+                                updates["verificationSource"] = it
+                            }
+                        }
+                        if (updates.size > 1) {
+                            docRef.update(updates).await()
+                        }
+                    }
+                }
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, lastPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun submitOptionalSchoolDetails(
+        school: School,
+        contributorName: String,
+        feeMin: Long,
+        feeMax: Long,
+        feeCurrency: String,
+        feePeriod: String,
+        admissionsOpen: Boolean,
+        admissionWindow: String?,
+        boardingOption: String?,
+        photoUrls: List<String>,
+        extraNotes: String?,
+        coursesOffered: List<String>,
+        gradeLevels: List<String>,
+        websiteUrl: String?,
+        contactPhone: String?
+    ): Result<String> {
+        var docPath = "schools/${school.id}"
+        return try {
+            requireUserId()
+            val persistedId = ensureSchoolPersisted(school).getOrThrow()
+            docPath = "schools/$persistedId"
+            val docRef = db.collection("schools").document(persistedId)
+
+            val safeFeeMin = feeMin.coerceIn(0L, 50_000_000L)
+            val safeFeeMax = feeMax.coerceAtLeast(safeFeeMin).coerceAtMost(100_000_000L)
+            val safeCurrency = feeCurrency.takeIf { it in SchoolConstants.FEE_CURRENCIES } ?: "NGN"
+            val safePeriod = feePeriod.takeIf { it in SchoolConstants.FEE_PERIODS } ?: "Per Term"
+            val safeTier = when {
+                safeFeeMax == 0L -> "Public / Free"
+                safeCurrency == "NGN" && safeFeeMax < 250_000L -> "$"
+                safeCurrency == "NGN" && safeFeeMax < 900_000L -> "$$"
+                safeCurrency != "NGN" && safeFeeMax < 5_000L -> "$"
+                safeCurrency != "NGN" && safeFeeMax < 15_000L -> "$$"
+                else -> "$$$"
+            }
+            val updates = mutableMapOf<String, Any>(
+                "feeMin" to safeFeeMin,
+                "feeMax" to safeFeeMax,
+                "feeCurrency" to safeCurrency,
+                "feePeriod" to safePeriod,
+                "tuitionTier" to safeTier,
+                "admissionsOpen" to admissionsOpen,
+                "lastEnrichedByName" to contributorName.trim().ifEmpty { "Community Contributor" }.take(80),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            val cleanWindow = admissionWindow?.trim()?.takeIf { it.isNotEmpty() }?.take(120)
+            if (cleanWindow != null) updates["admissionWindow"] = cleanWindow
+
+            boardingOption?.takeIf { it in SchoolConstants.BOARDING_OPTIONS }?.let {
+                updates["boardingOption"] = it
+            }
+            val safePhotos = sanitizeValidUrlList(photoUrls, 8, 300)
+            if (safePhotos.isNotEmpty()) updates["photoUrls"] = safePhotos
+
+            val cleanNotes = extraNotes?.trim()?.takeIf { it.isNotEmpty() }?.take(600)
+            if (cleanNotes != null) updates["extraNotes"] = cleanNotes
+
+            val cleanCourses = coursesOffered.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(25)
+            if (cleanCourses.isNotEmpty()) updates["coursesOffered"] = cleanCourses
+
+            val cleanGrades = gradeLevels.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(10)
+            if (cleanGrades.isNotEmpty()) updates["gradeLevels"] = cleanGrades
+
+            ExternalSchoolService.normalizeWebsiteUrl(websiteUrl)?.take(200)?.let {
+                updates["websiteUrl"] = it
+            }
+            contactPhone?.trim()?.takeIf { it.isNotEmpty() }?.take(40)?.let {
+                updates["contactPhone"] = it
+            }
+
+            docRef.update(updates).await()
+            Result.success(persistedId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docPath)
+            Result.failure(e)
+        }
+    }
+
     suspend fun createOrUpdateSchool(school: School, isNew: Boolean): Result<String> {
         val cleanExternalId = school.externalPlaceId?.trim()?.takeIf { it.isNotEmpty() }?.take(128)
-        val isClaimingUnregistered = isNew || school.id.isBlank() || school.id.startsWith("osm_") || school.adminUid.isBlank()
+        val hasValidExistingId = school.id.trim().matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))
+        val isClaimingExistingDoc = hasValidExistingId && school.adminUid.isBlank()
+        val isClaimingUnregistered = isNew || school.id.isBlank() || school.adminUid.isBlank()
         val schoolId = when {
+            hasValidExistingId -> school.id.trim()
             isClaimingUnregistered && cleanExternalId != null -> ExternalSchoolService.claimSchoolDocId(cleanExternalId)
             isClaimingUnregistered -> "sch_${UUID.randomUUID().toString().replace("-", "").take(16)}"
             else -> school.id
@@ -378,16 +640,23 @@ class SchoolRepository(
             val safePhone = school.contactPhone?.trim()?.takeIf { it.isNotEmpty() }?.take(40)
             val safeWebsite = ExternalSchoolService.normalizeWebsiteUrl(school.websiteUrl)?.take(200)
             val safeVerifStatus = school.verificationStatus.takeIf {
-                it in listOf("VERIFIED", "INTERNET_MATCHED", "UNVERIFIED")
+                it in listOf("VERIFIED", "VERIFIED_ONLINE", "INTERNET_MATCHED", "UNVERIFIED")
             } ?: "UNVERIFIED"
             val safeVerifSource = school.verificationSource?.trim()?.takeIf { it.isNotEmpty() }?.take(160)
+            val safeCitations = school.sourceCitations.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 350 }.distinct().take(12)
+            val safeMapsRef = school.googleMapsPlaceRef?.trim()?.takeIf { it.isNotEmpty() }?.take(160)
+            val safeMapsUrl = ExternalSchoolService.normalizeWebsiteUrl(school.googleMapsUrl)?.take(300)
+            val safeWindow = school.admissionWindow?.trim()?.takeIf { it.isNotEmpty() }?.take(120)
+            val safeBoarding = school.boardingOption?.takeIf { it in SchoolConstants.BOARDING_OPTIONS }
+            val safePhotos = sanitizeValidUrlList(school.photoUrls, 8, 300)
+            val safeNotes = school.extraNotes?.trim()?.takeIf { it.isNotEmpty() }?.take(600)
 
             val docRef = db.collection("schools").document(schoolId)
-            val existingSnap = if (isClaimingUnregistered && cleanExternalId != null) {
+            val existingSnap = if (isClaimingUnregistered || isClaimingExistingDoc) {
                 docRef.get().await()
             } else null
 
-            val shouldCreate = isClaimingUnregistered && (existingSnap == null || !existingSnap.exists())
+            val shouldCreate = (existingSnap == null && isClaimingUnregistered) || (existingSnap != null && !existingSnap.exists())
             if (!shouldCreate && existingSnap != null && existingSnap.exists()) {
                 val existingOwner = existingSnap.getString("adminUid")
                 if (!existingOwner.isNullOrBlank() && existingOwner != uid) {
@@ -396,7 +665,7 @@ class SchoolRepository(
             }
 
             if (shouldCreate) {
-                val payload = mapOf(
+                val payload = mutableMapOf<String, Any>(
                     "adminUid" to uid,
                     "adminName" to school.adminName.trim().ifEmpty { "School Admin" }.take(80),
                     "name" to cleanName,
@@ -426,17 +695,27 @@ class SchoolRepository(
                     "capacity" to safeCapacity,
                     "enrolledCount" to safeEnrolled,
                     "admissionsOpen" to school.admissionsOpen,
-                    "contactPhone" to safePhone,
-                    "externalPlaceId" to cleanExternalId,
-                    "websiteUrl" to safeWebsite,
                     "verificationStatus" to safeVerifStatus,
-                    "verificationSource" to safeVerifSource,
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
-                ).filterValues { it != null }
+                )
+                if (safePhone != null) payload["contactPhone"] = safePhone
+                if (cleanExternalId != null) payload["externalPlaceId"] = cleanExternalId
+                if (safeWebsite != null) payload["websiteUrl"] = safeWebsite
+                if (safeVerifSource != null) payload["verificationSource"] = safeVerifSource
+                if (safeCitations.isNotEmpty()) payload["sourceCitations"] = safeCitations
+                if (safeMapsRef != null) payload["googleMapsPlaceRef"] = safeMapsRef
+                if (safeMapsUrl != null) payload["googleMapsUrl"] = safeMapsUrl
+                if (safeWindow != null) payload["admissionWindow"] = safeWindow
+                if (safeBoarding != null) payload["boardingOption"] = safeBoarding
+                if (safePhotos.isNotEmpty()) payload["photoUrls"] = safePhotos
+                if (safeNotes != null) payload["extraNotes"] = safeNotes
                 docRef.set(payload).await()
             } else {
+                val existingOwner = existingSnap?.getString("adminUid")
+                val targetAdminUid = if (!existingOwner.isNullOrBlank()) existingOwner else uid
                 val updates = mutableMapOf<String, Any>(
+                    "adminUid" to targetAdminUid,
                     "adminName" to school.adminName.trim().ifEmpty { "School Admin" }.take(80),
                     "name" to cleanName,
                     "description" to school.description.trim().take(800),
@@ -472,6 +751,13 @@ class SchoolRepository(
                 if (cleanExternalId != null) updates["externalPlaceId"] = cleanExternalId
                 if (safeWebsite != null) updates["websiteUrl"] = safeWebsite
                 if (safeVerifSource != null) updates["verificationSource"] = safeVerifSource
+                if (safeCitations.isNotEmpty()) updates["sourceCitations"] = safeCitations
+                if (safeMapsRef != null) updates["googleMapsPlaceRef"] = safeMapsRef
+                if (safeMapsUrl != null) updates["googleMapsUrl"] = safeMapsUrl
+                if (safeWindow != null) updates["admissionWindow"] = safeWindow
+                if (safeBoarding != null) updates["boardingOption"] = safeBoarding
+                if (safePhotos.isNotEmpty()) updates["photoUrls"] = safePhotos
+                if (safeNotes != null) updates["extraNotes"] = safeNotes
                 docRef.update(updates).await()
             }
             Result.success(schoolId)
@@ -531,10 +817,14 @@ class SchoolRepository(
             val safePayId = paymentId?.trim()?.takeIf { it.isNotEmpty() }?.take(128)
             val safePayStatus = paymentStatus?.takeIf { it in listOf("UNPAID", "PAID", "PENDING_VERIFICATION") }
 
+            val persistedSchoolId = ensureSchoolPersisted(school).getOrThrow()
+            val schoolSnap = db.collection("schools").document(persistedSchoolId).get().await()
+            val effectiveAdminUid = schoolSnap.getString("adminUid") ?: school.adminUid
+
             val payload = mapOf(
-                "schoolId" to school.id,
+                "schoolId" to persistedSchoolId,
                 "schoolName" to school.name.take(100),
-                "adminUid" to school.adminUid,
+                "adminUid" to effectiveAdminUid,
                 "parentUid" to uid,
                 "parentName" to parentName.trim().ifEmpty { "Parent" }.take(80),
                 "studentName" to cleanStudent,
@@ -896,314 +1186,6 @@ class SchoolRepository(
         }
     }
 
-    suspend fun seedSampleDirectoryAround(
-        centerLat: Double,
-        centerLng: Double,
-        adminName: String
-    ): Result<Unit> {
-        return try {
-            val uid = requireUserId()
-            val samples = listOf(
-                School(
-                    id = "sch_sample_greensprings_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "Greensprings Dual Heritage School",
-                    description = "Blended Nigerian & British curriculum with Olympiad robotics, orchestra, and competitive swimming & football.",
-                    address = "24 Admiralty Crescent",
-                    latitude = centerLat + 0.012,
-                    longitude = centerLng + 0.015,
-                    curriculum = "Nigerian & British",
-                    faithBased = false,
-                    faithTradition = "Secular",
-                    specialSchool = false,
-                    specialNeedsSupport = "Inclusive Learning Support",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("Creche / Pre-K", "Primary", "Junior Secondary", "Senior Secondary"),
-                    activities = listOf("Robotics", "Debate & MUN", "Orchestra & Music", "Coding Club"),
-                    sportsFocus = listOf("Football (Soccer)", "Swimming", "Athletics & Track"),
-                    feeMin = 550_000L,
-                    feeMax = 1_150_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Term",
-                    rankingScore = 96.4,
-                    districtRank = 1L,
-                    rating = 4.9,
-                    tuitionTier = "$$$",
-                    capacity = 850L,
-                    enrolledCount = 720L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-111-2020"
-                ),
-                School(
-                    id = "sch_sample_crescent_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "St. Jude Faith & STEM College",
-                    description = "Faith-based Nigerian curriculum school fostering moral leadership, STEM clubs, and basketball excellence.",
-                    address = "18 Heritage Boulevard",
-                    latitude = centerLat - 0.018,
-                    longitude = centerLng + 0.009,
-                    curriculum = "Nigerian",
-                    faithBased = true,
-                    faithTradition = "Christian",
-                    specialSchool = false,
-                    specialNeedsSupport = "General Education",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("Primary", "Junior Secondary", "Senior Secondary"),
-                    activities = listOf("STEM Olympiad", "Chess Club", "Drama & Theatre"),
-                    sportsFocus = listOf("Basketball", "Football (Soccer)", "Table Tennis"),
-                    feeMin = 220_000L,
-                    feeMax = 450_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Term",
-                    rankingScore = 91.2,
-                    districtRank = 3L,
-                    rating = 4.7,
-                    tuitionTier = "$",
-                    capacity = 600L,
-                    enrolledCount = 510L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-222-3030"
-                ),
-                School(
-                    id = "sch_sample_kensington_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "Kensington British Grammar",
-                    description = "Full Cambridge IGCSE & A-Level British curriculum with lawn tennis academy and Model UN.",
-                    address = "7 Victoria Gardens",
-                    latitude = centerLat + 0.032,
-                    longitude = centerLng - 0.025,
-                    curriculum = "British",
-                    faithBased = false,
-                    faithTradition = "Secular",
-                    specialSchool = false,
-                    specialNeedsSupport = "General Education",
-                    studentMix = "Girls Only",
-                    gradeLevels = listOf("Primary", "Junior Secondary", "Senior Secondary", "Sixth Form"),
-                    activities = listOf("Debate & MUN", "Visual Arts", "Orchestra & Music"),
-                    sportsFocus = listOf("Lawn Tennis", "Swimming", "Badminton"),
-                    feeMin = 900_000L,
-                    feeMax = 1_850_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Term",
-                    rankingScore = 94.8,
-                    districtRank = 2L,
-                    rating = 4.8,
-                    tuitionTier = "$$$",
-                    capacity = 420L,
-                    enrolledCount = 385L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-333-4040"
-                ),
-                School(
-                    id = "sch_sample_brightstar_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "BrightStar Special Needs Academy",
-                    description = "Dedicated special education school offering individualized therapy, sensory classrooms, and adaptive athletics.",
-                    address = "41 Willow Lane",
-                    latitude = centerLat - 0.009,
-                    longitude = centerLng - 0.019,
-                    curriculum = "Nigerian & British",
-                    faithBased = true,
-                    faithTradition = "Interfaith",
-                    specialSchool = true,
-                    specialNeedsSupport = "Special Education (Autism, Speech & Sensory)",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("Creche / Pre-K", "Primary", "Junior Secondary"),
-                    activities = listOf("Visual Arts", "Orchestra & Music", "Environmental Club"),
-                    sportsFocus = listOf("Swimming", "Athletics & Track", "Table Tennis"),
-                    feeMin = 380_000L,
-                    feeMax = 680_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Term",
-                    rankingScore = 92.6,
-                    districtRank = 4L,
-                    rating = 4.9,
-                    tuitionTier = "$$",
-                    capacity = 180L,
-                    enrolledCount = 142L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-444-5050"
-                ),
-                School(
-                    id = "sch_sample_university_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "Meridian Coastal University",
-                    description = "Accredited Nigerian & British partner university offering NUC/international undergraduate and postgraduate degrees with varsity athletics.",
-                    address = "102 University Expressway",
-                    latitude = centerLat + 0.024,
-                    longitude = centerLng + 0.028,
-                    curriculum = "Nigerian & British",
-                    institutionType = "University",
-                    faithBased = false,
-                    faithTradition = "Secular",
-                    specialSchool = false,
-                    specialNeedsSupport = "Inclusive Disability & Academic Support Unit",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("Undergraduate", "Postgraduate"),
-                    coursesOffered = listOf("Computer Science", "Medicine & Surgery", "Law", "Accounting & Finance", "Nursing & Health Sciences", "Mass Communication"),
-                    activities = listOf("Robotics", "Debate & MUN", "Entrepreneurship"),
-                    sportsFocus = listOf("Football (Soccer)", "Basketball", "Athletics & Track"),
-                    feeMin = 850_000L,
-                    feeMax = 2_400_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Year",
-                    rankingScore = 95.8,
-                    districtRank = 2L,
-                    rating = 4.9,
-                    tuitionTier = "$$$",
-                    capacity = 4200L,
-                    enrolledCount = 3650L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-555-6060",
-                    verificationStatus = "INTERNET_MATCHED",
-                    verificationSource = "Accredited Higher Education Listing"
-                ),
-                School(
-                    id = "sch_sample_polytechnic_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "Atlantic Technology Polytechnic",
-                    description = "NBTE-aligned polytechnic running practical National Diploma (ND) and Higher National Diploma (HND) engineering & tech programmes.",
-                    address = "15 Innovation Drive",
-                    latitude = centerLat - 0.027,
-                    longitude = centerLng + 0.021,
-                    curriculum = "Nigerian",
-                    institutionType = "Polytechnic",
-                    faithBased = false,
-                    faithTradition = "Secular",
-                    specialSchool = false,
-                    specialNeedsSupport = "General Education",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("ND / HND Programme"),
-                    coursesOffered = listOf("Civil Engineering", "Electrical Electronics Eng.", "Computer Science", "Business Administration", "Agricultural Technology"),
-                    activities = listOf("Coding Club", "Entrepreneurship", "STEM Olympiad"),
-                    sportsFocus = listOf("Football (Soccer)", "Volleyball", "Table Tennis"),
-                    feeMin = 180_000L,
-                    feeMax = 380_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Year",
-                    rankingScore = 89.5,
-                    districtRank = 5L,
-                    rating = 4.6,
-                    tuitionTier = "$",
-                    capacity = 2500L,
-                    enrolledCount = 2120L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-666-7070",
-                    verificationStatus = "INTERNET_MATCHED",
-                    verificationSource = "Public Technical & Polytechnic Registry"
-                ),
-                School(
-                    id = "sch_sample_coe_${uid.take(6)}",
-                    adminUid = uid,
-                    adminName = adminName,
-                    name = "Heritage College of Education",
-                    description = "Teacher-training college of education offering NCE and B.Ed programmes in pedagogy, early childhood, and STEM teaching.",
-                    address = "88 Scholars Avenue",
-                    latitude = centerLat + 0.014,
-                    longitude = centerLng - 0.031,
-                    curriculum = "Nigerian",
-                    institutionType = "College of Education",
-                    faithBased = false,
-                    faithTradition = "Secular",
-                    specialSchool = false,
-                    specialNeedsSupport = "Special Education Teacher Training",
-                    studentMix = "Mixed",
-                    gradeLevels = listOf("NCE Programme", "Undergraduate"),
-                    coursesOffered = listOf("Education & Pedagogy", "Early Childhood Education", "Sciences & Biotechnology", "Arts & Humanities"),
-                    activities = listOf("Debate & MUN", "Drama & Theatre", "Environmental Club"),
-                    sportsFocus = listOf("Athletics & Track", "Badminton", "Football (Soccer)"),
-                    feeMin = 95_000L,
-                    feeMax = 210_000L,
-                    feeCurrency = "NGN",
-                    feePeriod = "Per Year",
-                    rankingScore = 88.0,
-                    districtRank = 6L,
-                    rating = 4.6,
-                    tuitionTier = "$",
-                    capacity = 1800L,
-                    enrolledCount = 1490L,
-                    admissionsOpen = true,
-                    contactPhone = "+234-800-777-8080",
-                    verificationStatus = "INTERNET_MATCHED",
-                    verificationSource = "Teacher Education Directory Listing"
-                )
-            )
-
-            samples.forEach { sample ->
-                val ref = db.collection("schools").document(sample.id)
-                if (!ref.get().await().exists()) {
-                    val payload = mapOf(
-                        "adminUid" to uid,
-                        "adminName" to sample.adminName,
-                        "name" to sample.name,
-                        "description" to sample.description,
-                        "address" to sample.address,
-                        "latitude" to sample.latitude,
-                        "longitude" to sample.longitude,
-                        "curriculum" to sample.curriculum,
-                        "institutionType" to sample.institutionType,
-                        "faithBased" to sample.faithBased,
-                        "faithTradition" to sample.faithTradition,
-                        "specialSchool" to sample.specialSchool,
-                        "specialNeedsSupport" to sample.specialNeedsSupport,
-                        "studentMix" to sample.studentMix,
-                        "gradeLevels" to sample.gradeLevels,
-                        "coursesOffered" to sample.coursesOffered,
-                        "activities" to sample.activities,
-                        "sportsFocus" to sample.sportsFocus,
-                        "feeMin" to sample.feeMin,
-                        "feeMax" to sample.feeMax,
-                        "feeCurrency" to sample.feeCurrency,
-                        "feePeriod" to sample.feePeriod,
-                        "rankingScore" to sample.rankingScore,
-                        "districtRank" to sample.districtRank,
-                        "rating" to sample.rating,
-                        "tuitionTier" to sample.tuitionTier,
-                        "capacity" to sample.capacity,
-                        "enrolledCount" to sample.enrolledCount,
-                        "admissionsOpen" to sample.admissionsOpen,
-                        "contactPhone" to sample.contactPhone,
-                        "verificationStatus" to sample.verificationStatus,
-                        "verificationSource" to sample.verificationSource,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    ).filterValues { it != null }
-                    ref.set(payload).await()
-                }
-            }
-
-            val firstSample = samples.first()
-            val annId = "ann_sample_${uid.take(8)}"
-            val annRef = db.collection("announcements").document(annId)
-            if (!annRef.get().await().exists()) {
-                annRef.set(
-                    mapOf(
-                        "schoolId" to firstSample.id,
-                        "schoolName" to firstSample.name,
-                        "adminUid" to uid,
-                        "title" to "Admissions Open House & Sports Showcase",
-                        "body" to "Tour our dual Nigerian & British classrooms, robotics lab, and Olympic pool this Saturday.",
-                        "category" to "Event",
-                        "eventDate" to "Saturday • 10:00 AM",
-                        "createdAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, "schools")
-            Result.failure(e)
-        }
-    }
-
     fun observeAdverts(): Flow<List<Advert>> = flow {
         val uid = requireUserId()
         val path = "adverts"
@@ -1330,97 +1312,6 @@ class SchoolRepository(
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, docPath)
-            Result.failure(e)
-        }
-    }
-
-    suspend fun seedSampleAdvertsAround(centerLat: Double, centerLng: Double): Result<Unit> {
-        return try {
-            val uid = requireUserId()
-            val samples = listOf(
-                Advert(
-                    id = "adv_sample_hero_${uid.take(6)}",
-                    advertiserName = "Greensprings Dual Heritage",
-                    title = "2026 Entrance Exam & Merit Scholarships",
-                    body = "Register for Nigerian & British Dual Curriculum entry assessments. Up to 50% STEM & Varsity Sports scholarships available.",
-                    category = "School Admissions",
-                    curriculumFocus = "Nigerian & British",
-                    planTier = "District Hero",
-                    planPriceLabel = "₦75,000 / 30 days",
-                    durationDays = 30L,
-                    targetLocation = "Lekki & Victoria Island",
-                    latitude = centerLat + 0.01,
-                    longitude = centerLng + 0.01,
-                    ctaLabel = "Inquire Admissions",
-                    contactInfo = "admissions@greensprings-demo.edu.ng",
-                    status = "ACTIVE"
-                ),
-                Advert(
-                    id = "adv_sample_tutor_${uid.take(6)}",
-                    advertiserName = "Progressive Tutors Collective",
-                    title = "IGCSE & WAEC Intensive Online Bootcamps",
-                    body = "Small-group and 1-on-1 live online tutoring in Cambridge Physics, Further Maths, and English Studies with certified examiners.",
-                    category = "Progressive Tutors",
-                    curriculumFocus = "Cambridge",
-                    planTier = "Featured Spotlight",
-                    planPriceLabel = "₦35,000 / 14 days",
-                    durationDays = 14L,
-                    targetLocation = "Lagos & Remote",
-                    latitude = centerLat - 0.015,
-                    longitude = centerLng + 0.012,
-                    ctaLabel = "Book Online Trial",
-                    contactInfo = "tutors@schoolcompass-demo.edu.ng",
-                    status = "ACTIVE"
-                ),
-                Advert(
-                    id = "adv_sample_sports_${uid.take(6)}",
-                    advertiserName = "Kensington Swim & Tennis Academy",
-                    title = "Summer Youth Aquatics & Coding Camp",
-                    body = "Weekend lawn tennis, Olympic swimming coaching, and robotics camp open to Primary & Secondary students.",
-                    category = "Sports & Camps",
-                    curriculumFocus = "British",
-                    planTier = "Starter Boost",
-                    planPriceLabel = "₦15,000 / 7 days",
-                    durationDays = 7L,
-                    targetLocation = "Ikoyi & Victoria Island",
-                    latitude = centerLat + 0.025,
-                    longitude = centerLng - 0.02,
-                    ctaLabel = "Reserve Spot",
-                    contactInfo = "camps@kensington-demo.edu.ng",
-                    status = "ACTIVE"
-                )
-            )
-
-            samples.forEach { sample ->
-                val ref = db.collection("adverts").document(sample.id)
-                if (!ref.get().await().exists()) {
-                    val payload = mapOf(
-                        "ownerUid" to uid,
-                        "advertiserName" to sample.advertiserName,
-                        "title" to sample.title,
-                        "body" to sample.body,
-                        "category" to sample.category,
-                        "curriculumFocus" to sample.curriculumFocus,
-                        "planTier" to sample.planTier,
-                        "planPriceLabel" to sample.planPriceLabel,
-                        "durationDays" to sample.durationDays,
-                        "targetLocation" to sample.targetLocation,
-                        "latitude" to sample.latitude,
-                        "longitude" to sample.longitude,
-                        "ctaLabel" to sample.ctaLabel,
-                        "contactInfo" to sample.contactInfo,
-                        "status" to sample.status,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    ).filterValues { it != null }
-                    ref.set(payload).await()
-                }
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, "adverts")
             Result.failure(e)
         }
     }
@@ -1638,140 +1529,4 @@ class SchoolRepository(
         }
     }
 
-    suspend fun seedSampleTutorsAround(centerLat: Double, centerLng: Double): Result<Unit> {
-        return try {
-            val uid = requireUserId()
-            val samples = listOf(
-                ProgressiveTutor(
-                    id = "tut_sample_funke_${uid.take(6)}",
-                    teacherUid = uid,
-                    fullName = "Mrs. Funke Adeyemi",
-                    sex = "Female",
-                    headline = "Cambridge IGCSE & WAEC Dual Mathematics Tutor",
-                    bio = "12 years preparing students for Cambridge Checkpoint/IGCSE and Nigerian WAEC/NECO Distinctions in interactive online classrooms.",
-                    curriculumTracks = listOf("Cambridge", "Nigerian"),
-                    cambridgeSubjects = listOf("Cambridge IGCSE Mathematics", "Cambridge Physics"),
-                    nigerianSubjects = listOf("WAEC / NECO Mathematics", "Further Mathematics"),
-                    allSubjects = listOf("Cambridge IGCSE Mathematics", "Cambridge Physics", "WAEC / NECO Mathematics", "Further Mathematics"),
-                    qualifications = "M.Sc. Mathematics • Cambridge Certified & TRCN",
-                    yearsExperience = 12L,
-                    hourlyRate = 8500L,
-                    currency = "NGN",
-                    meetingPlatform = "Google Meet",
-                    availability = "Mon–Sat • 4:00 PM – 8:30 PM",
-                    locationLabel = "Lekki Phase 1",
-                    latitude = centerLat + 0.011,
-                    longitude = centerLng + 0.014,
-                    rating = 4.9,
-                    onlineActive = true
-                ),
-                ProgressiveTutor(
-                    id = "tut_sample_chidi_${uid.take(6)}",
-                    teacherUid = uid,
-                    fullName = "Mr. Chidi Okafor",
-                    sex = "Male",
-                    headline = "Cambridge Computer Science & Nigerian STEM Mentor",
-                    bio = "Software engineer & examiner helping secondary students master Python, algorithms, Cambridge CS, and Basic Science & Tech.",
-                    curriculumTracks = listOf("Cambridge", "Nigerian"),
-                    cambridgeSubjects = listOf("Cambridge Computer Science", "Cambridge Chemistry"),
-                    nigerianSubjects = listOf("Basic Science & Tech", "WAEC / NECO Mathematics"),
-                    allSubjects = listOf("Cambridge Computer Science", "Cambridge Chemistry", "Basic Science & Tech", "WAEC / NECO Mathematics"),
-                    qualifications = "B.Eng. Computer Engineering • Microsoft Educator",
-                    yearsExperience = 8L,
-                    hourlyRate = 7500L,
-                    currency = "NGN",
-                    meetingPlatform = "Zoom",
-                    availability = "Tue–Sun • 3:30 PM – 9:00 PM",
-                    locationLabel = "Victoria Island",
-                    latitude = centerLat - 0.019,
-                    longitude = centerLng - 0.011,
-                    rating = 4.8,
-                    onlineActive = true
-                ),
-                ProgressiveTutor(
-                    id = "tut_sample_aisha_${uid.take(6)}",
-                    teacherUid = uid,
-                    fullName = "Dr. Aisha Bello",
-                    sex = "Female",
-                    headline = "Cambridge Biology & Nigerian Agricultural Science",
-                    bio = "PhD educator offering structured 1-on-1 lab simulations, past-question drills, and exam strategy sessions online.",
-                    curriculumTracks = listOf("Cambridge", "Nigerian"),
-                    cambridgeSubjects = listOf("Cambridge Biology", "Cambridge Chemistry"),
-                    nigerianSubjects = listOf("Agricultural Science", "Basic Science & Tech"),
-                    allSubjects = listOf("Cambridge Biology", "Cambridge Chemistry", "Agricultural Science", "Basic Science & Tech"),
-                    qualifications = "Ph.D. Biological Sciences • IGCSE Examiner",
-                    yearsExperience = 10L,
-                    hourlyRate = 9000L,
-                    currency = "NGN",
-                    meetingPlatform = "Google Meet",
-                    availability = "Mon–Fri • 5:00 PM – 8:00 PM",
-                    locationLabel = "Ikeja GRA",
-                    latitude = centerLat + 0.045,
-                    longitude = centerLng - 0.032,
-                    rating = 4.9,
-                    onlineActive = true
-                ),
-                ProgressiveTutor(
-                    id = "tut_sample_tunde_${uid.take(6)}",
-                    teacherUid = uid,
-                    fullName = "Mr. Tunde Balogun",
-                    sex = "Male",
-                    headline = "English Studies, Civic Education & Cambridge Economics",
-                    bio = "Dedicated humanities & essay coaching specialist for Nigerian BECE/WAEC and Cambridge IGCSE English & Economics.",
-                    curriculumTracks = listOf("Cambridge", "Nigerian"),
-                    cambridgeSubjects = listOf("Cambridge English Language", "Cambridge Economics", "Cambridge Accounting"),
-                    nigerianSubjects = listOf("English Studies", "Civic Education", "Nigerian History & Govt"),
-                    allSubjects = listOf("Cambridge English Language", "Cambridge Economics", "Cambridge Accounting", "English Studies", "Civic Education", "Nigerian History & Govt"),
-                    qualifications = "M.A. English Education • IELTS & IGCSE Coach",
-                    yearsExperience = 7L,
-                    hourlyRate = 6500L,
-                    currency = "NGN",
-                    meetingPlatform = "SchoolCompass Live",
-                    availability = "Daily • 2:00 PM – 7:00 PM",
-                    locationLabel = "Surulere / Ikoyi",
-                    latitude = centerLat - 0.034,
-                    longitude = centerLng + 0.029,
-                    rating = 4.7,
-                    onlineActive = true
-                )
-            )
-
-            samples.forEach { sample ->
-                val ref = db.collection("tutors").document(sample.id)
-                if (!ref.get().await().exists()) {
-                    val payload = mapOf(
-                        "teacherUid" to uid,
-                        "fullName" to sample.fullName,
-                        "sex" to sample.sex,
-                        "headline" to sample.headline,
-                        "bio" to sample.bio,
-                        "curriculumTracks" to sample.curriculumTracks,
-                        "cambridgeSubjects" to sample.cambridgeSubjects,
-                        "nigerianSubjects" to sample.nigerianSubjects,
-                        "allSubjects" to sample.allSubjects,
-                        "qualifications" to sample.qualifications,
-                        "yearsExperience" to sample.yearsExperience,
-                        "hourlyRate" to sample.hourlyRate,
-                        "currency" to sample.currency,
-                        "meetingPlatform" to sample.meetingPlatform,
-                        "availability" to sample.availability,
-                        "locationLabel" to sample.locationLabel,
-                        "latitude" to sample.latitude,
-                        "longitude" to sample.longitude,
-                        "rating" to sample.rating,
-                        "onlineActive" to sample.onlineActive,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    ref.set(payload).await()
-                }
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.CREATE, "tutors")
-            Result.failure(e)
-        }
-    }
 }

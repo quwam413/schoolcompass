@@ -198,10 +198,30 @@ object ExternalSchoolService {
             }
 
             val operatorTag = tags.optString("operator").trim()
+            val osmUrl = "https://www.openstreetmap.org/$type/$osmNumId"
+            val osmMapsUrl = "https://www.google.com/maps/search/?api=1&query=$lat,$lng"
+            val osmCitations = buildList {
+                add(
+                    GroundingSourceLink(
+                        title = "OpenStreetMap Directory ($type/$osmNumId)",
+                        uri = osmUrl,
+                        sourceType = "Google Search"
+                    ).toCitationString()
+                )
+                if (!websiteUrl.isNullOrBlank()) {
+                    add(
+                        GroundingSourceLink(
+                            title = "$rawName Official Site",
+                            uri = websiteUrl,
+                            sourceType = "Google Search"
+                        ).toCitationString()
+                    )
+                }
+            }
             val descParts = buildList {
-                add("Publicly mapped ${institutionType.lowercase(Locale.US)} discovered via OpenStreetMap.")
+                add("Verified online ${institutionType.lowercase(Locale.US)} mapped in public OpenStreetMap directory.")
                 if (operatorTag.isNotEmpty()) add("Operator: $operatorTag.")
-                add("Not yet registered on Skolquik — administrators can claim this listing to add courses, programmes, fee ranges, and sports.")
+                add("Schools or users can optionally claim or add tuition brackets, admission windows, and photos anytime.")
             }
 
             parsed.add(
@@ -244,7 +264,9 @@ object ExternalSchoolService {
                     externalPlaceId = externalId,
                     websiteUrl = websiteUrl,
                     verificationStatus = "INTERNET_MATCHED",
-                    verificationSource = "OpenStreetMap Directory (${type}/$osmNumId)"
+                    verificationSource = "OpenStreetMap Directory (${type}/$osmNumId)",
+                    sourceCitations = osmCitations,
+                    googleMapsUrl = osmMapsUrl
                 )
             )
         }
@@ -388,21 +410,56 @@ object ExternalSchoolService {
         return "ext_$sanitized"
     }
 
+    private fun schoolMergePriority(school: School): Int = when {
+        school.hasPlatformAdmin() -> 40
+        !school.lastEnrichedByName.isNullOrBlank() || school.feeMax > 0L -> 30
+        school.verificationStatus == "VERIFIED_ONLINE" -> 20
+        school.verificationStatus == "INTERNET_MATCHED" -> 10
+        else -> 5
+    }
+
     fun mergeRegisteredAndExternalSchools(
         registered: List<School>,
         external: List<School>
     ): List<School> {
-        val claimedIds = registered.mapNotNull { it.externalPlaceId?.takeIf(String::isNotBlank) }.toSet()
-        val unclaimedExternal = external.filter { ext ->
-            val extId = ext.externalPlaceId
-            val claimedById = extId != null && extId in claimedIds
-            val claimedByProximityAndName = registered.any { reg ->
-                val dist = calculateDistanceKm(reg.latitude, reg.longitude, ext.latitude, ext.longitude)
-                dist <= 0.45 && namesSimilar(reg.name, ext.name)
+        val ordered = (registered + external).sortedWith(
+            compareByDescending<School> { schoolMergePriority(it) }
+                .thenByDescending { it.sourceCitations.size }
+        )
+        val merged = mutableListOf<School>()
+        for (candidate in ordered) {
+            val matchIndex = merged.indexOfFirst { existing ->
+                val sameId = existing.id.isNotBlank() && existing.id == candidate.id
+                val sameExternalId = !candidate.externalPlaceId.isNullOrBlank() &&
+                    !existing.externalPlaceId.isNullOrBlank() &&
+                    existing.externalPlaceId == candidate.externalPlaceId
+                val nearSameName = calculateDistanceKm(
+                    existing.latitude,
+                    existing.longitude,
+                    candidate.latitude,
+                    candidate.longitude
+                ) <= 0.45 && namesSimilar(existing.name, candidate.name)
+                sameId || sameExternalId || nearSameName
             }
-            !claimedById && !claimedByProximityAndName
+            if (matchIndex == -1) {
+                merged.add(candidate)
+            } else {
+                val primary = merged[matchIndex]
+                val combinedCitations = (primary.sourceCitations + candidate.sourceCitations)
+                    .distinct()
+                    .take(10)
+                merged[matchIndex] = primary.copy(
+                    websiteUrl = primary.websiteUrl?.takeIf { it.isNotBlank() } ?: candidate.websiteUrl,
+                    contactPhone = primary.contactPhone?.takeIf { it.isNotBlank() } ?: candidate.contactPhone,
+                    googleMapsPlaceRef = primary.googleMapsPlaceRef?.takeIf { it.isNotBlank() } ?: candidate.googleMapsPlaceRef,
+                    googleMapsUrl = primary.googleMapsUrl?.takeIf { it.isNotBlank() } ?: candidate.googleMapsUrl,
+                    sourceCitations = combinedCitations,
+                    admissionWindow = primary.admissionWindow?.takeIf { it.isNotBlank() } ?: candidate.admissionWindow,
+                    boardingOption = primary.boardingOption?.takeIf { it.isNotBlank() } ?: candidate.boardingOption
+                )
+            }
         }
-        return registered + unclaimedExternal
+        return merged
     }
 
     fun normalizeWebsiteUrl(raw: String?): String? {

@@ -4,51 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.automirrored.outlined.Chat
-import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Campaign
-import androidx.compose.material.icons.filled.CastForEducation
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.FamilyRestroom
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.outlined.AdminPanelSettings
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.Campaign
-import androidx.compose.material.icons.outlined.CastForEducation
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.FamilyRestroom
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationRail
-import androidx.compose.material3.NavigationRailItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,17 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,7 +34,9 @@ import com.example.data.PaymentRepository
 import com.example.data.SchoolRepository
 import com.example.ui.AdminHubScreen
 import com.example.ui.AiAdvisorScreen
+import com.example.ui.DashboardScreen
 import com.example.ui.DiscoverScreen
+import com.example.ui.HelpSupportScreen
 import com.example.ui.MainTab
 import com.example.ui.MessagesScreen
 import com.example.ui.PaidAdvertsScreen
@@ -93,13 +44,20 @@ import com.example.ui.ParentPortalScreen
 import com.example.ui.PaymentReceiptDialog
 import com.example.ui.ProgressiveTutorsScreen
 import com.example.ui.RegistrationPortalScreen
+import com.example.ui.SavedSchoolsScreen
 import com.example.ui.SchoolViewModel
+import com.example.ui.SettingsPrivacyScreen
+import com.example.ui.SkolquikMinimalShell
 import com.example.ui.UiState
 import com.example.ui.theme.SchoolCompassTheme
+import com.example.ui.theme.ThemePreferencesStore
+import com.example.ui.theme.ThemeSettings
+import com.example.ui.theme.resolveIsDarkTheme
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,15 +67,36 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         NotificationHelper.ensureChannel(this)
         setContent {
-            SchoolCompassTheme {
-                AppContent()
+            val context = LocalContext.current
+            val themeStore = remember(context) { ThemePreferencesStore(context.applicationContext) }
+            val themeSettings by themeStore.settingsFlow.collectAsStateWithLifecycle(initialValue = ThemeSettings())
+            var solarLatLng by remember { mutableStateOf(6.4474 to 3.4737) }
+            val resolvedDark = resolveIsDarkTheme(
+                appearanceMode = themeSettings.appearanceMode,
+                latitude = solarLatLng.first,
+                longitude = solarLatLng.second
+            )
+            SchoolCompassTheme(
+                darkTheme = resolvedDark,
+                highlightHue = themeSettings.highlightHue,
+                dynamicColor = false
+            ) {
+                AppContent(
+                    themeStore = themeStore,
+                    themeSettings = themeSettings,
+                    onSolarLocationChanged = { lat, lng -> solarLatLng = lat to lng }
+                )
             }
         }
     }
 }
 
 @Composable
-fun AppContent() {
+fun AppContent(
+    themeStore: ThemePreferencesStore,
+    themeSettings: ThemeSettings,
+    onSolarLocationChanged: (Double, Double) -> Unit
+) {
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
     var preferAdminPortalAfterAuth by remember { mutableStateOf(false) }
 
@@ -146,19 +125,24 @@ fun AppContent() {
                 currentUserId = user.uid,
                 userEmail = user.email ?: "",
                 userDisplayName = user.displayName ?: "",
-                initialPreferAdminPortal = preferAdminPortalAfterAuth
+                initialPreferAdminPortal = preferAdminPortalAfterAuth,
+                themeStore = themeStore,
+                themeSettings = themeSettings,
+                onSolarLocationChanged = onSolarLocationChanged
             )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AuthenticatedShell(
     currentUserId: String,
     userEmail: String,
     userDisplayName: String,
-    initialPreferAdminPortal: Boolean
+    initialPreferAdminPortal: Boolean,
+    themeStore: ThemePreferencesStore,
+    themeSettings: ThemeSettings,
+    onSolarLocationChanged: (Double, Double) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -225,6 +209,8 @@ private fun AuthenticatedShell(
     val claimingExternalSchool by viewModel.claimingExternalSchool.collectAsStateWithLifecycle()
     val externalDirectoryLoading by viewModel.externalDirectoryLoading.collectAsStateWithLifecycle()
     val externalDirectoryError by viewModel.externalDirectoryError.collectAsStateWithLifecycle()
+    val onlineGroundingLoading by viewModel.onlineGroundingLoading.collectAsStateWithLifecycle()
+    val onlineGroundingError by viewModel.onlineGroundingError.collectAsStateWithLifecycle()
     val isGeocodingLocation by viewModel.isGeocodingLocation.collectAsStateWithLifecycle()
     val selectedSchoolDetailState by viewModel.selectedSchoolDetailState.collectAsStateWithLifecycle()
     val selectedSchoolAnnouncementsState by viewModel.selectedSchoolAnnouncementsState.collectAsStateWithLifecycle()
@@ -243,7 +229,14 @@ private fun AuthenticatedShell(
     val aiChatMessages by viewModel.aiChatMessages.collectAsStateWithLifecycle()
     val aiChatError by viewModel.aiChatError.collectAsStateWithLifecycle()
     val isAiGenerating by viewModel.isAiGenerating.collectAsStateWithLifecycle()
+    val isHomeRefreshing by viewModel.isHomeRefreshing.collectAsStateWithLifecycle()
+    val onlineTutorsLoading by viewModel.onlineTutorsLoading.collectAsStateWithLifecycle()
+    val onlineTutorsError by viewModel.onlineTutorsError.collectAsStateWithLifecycle()
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
+
+    LaunchedEffect(searchFilter.centerLat, searchFilter.centerLng) {
+        onSolarLocationChanged(searchFilter.centerLat, searchFilter.centerLng)
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showProfileEditor by remember { mutableStateOf(false) }
@@ -305,193 +298,41 @@ private fun AuthenticatedShell(
     }
 
     val currentProfile = (profileState as? UiState.Success)?.data
-    val navItems = listOf(
-        Triple(MainTab.DISCOVER, stringResource(R.string.tab_discover), Pair(Icons.Filled.Explore, Icons.Outlined.Explore)),
-        Triple(MainTab.TUTORS, stringResource(R.string.tab_progressive_tutors), Pair(Icons.Filled.CastForEducation, Icons.Outlined.CastForEducation)),
-        Triple(MainTab.MESSAGES, stringResource(R.string.tab_messages), Pair(Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat)),
-        Triple(MainTab.PORTAL, stringResource(R.string.tab_portal), Pair(Icons.Filled.FamilyRestroom, Icons.Outlined.FamilyRestroom)),
-        Triple(MainTab.ADMIN, stringResource(R.string.tab_admin), Pair(Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings))
-    )
-    val railItems = navItems + listOf(
-        Triple(
-            MainTab.ADVERTS,
-            stringResource(R.string.tab_adverts),
-            Pair(Icons.Filled.Campaign, Icons.Outlined.Campaign)
-        ),
-        Triple(
-            MainTab.AI_ADVISOR,
-            stringResource(R.string.tab_ai_advisor),
-            Pair(Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome)
-        )
-    )
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val useRail = maxWidth >= 600.dp
-
-        Scaffold(
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.img_launcher_foreground),
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(7.dp))
-                            )
-                            Text(
-                                text = stringResource(R.string.app_name),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    actions = {
-                        if (viewModel.isPlatformAdmin) {
-                            IconButton(
-                                onClick = { viewModel.selectTab(MainTab.ADMIN) },
-                                modifier = Modifier.testTag("open_oversight_shortcut")
-                            ) {
-                                Icon(
-                                    Icons.Filled.AdminPanelSettings,
-                                    contentDescription = "Platform Super Admin Oversight",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        IconButton(
-                            onClick = { viewModel.selectTab(MainTab.AI_ADVISOR) },
-                            modifier = Modifier.testTag("open_ai_advisor_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = "Open Skolquik AI Advisor",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        FilledTonalButton(
-                            onClick = { viewModel.selectTab(MainTab.ADVERTS) },
-                            modifier = Modifier
-                                .padding(end = 4.dp)
-                                .testTag("open_paid_adverts_button")
-                        ) {
-                            Icon(
-                                Icons.Filled.Campaign,
-                                contentDescription = "Open Paid Adverts Page",
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.size(4.dp))
-                            Text("Adverts", style = MaterialTheme.typography.labelMedium)
-                        }
-                        IconButton(
-                            onClick = { showProfileEditor = true },
-                            modifier = Modifier.testTag("profile_settings_button")
-                        ) {
-                            Icon(Icons.Filled.Person, contentDescription = "Registration & Profile")
-                        }
-                        IconButton(
-                            onClick = {
-                                AuthManager.signOut(
-                                    credentialManager = credentialManager,
-                                    scope = scope
-                                )
-                            },
-                            modifier = Modifier.testTag("sign_out_button")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Sign out")
-                        }
-                    }
-                )
-            },
-            bottomBar = {
-                if (!useRail) {
-                    NavigationBar(
-                        modifier = Modifier.navigationBarsPadding()
-                    ) {
-                        navItems.forEach { (tab, label, icons) ->
-                            val selected = selectedTab == tab
-                            NavigationBarItem(
-                                selected = selected,
-                                onClick = { viewModel.selectTab(tab) },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (selected) icons.first else icons.second,
-                                        contentDescription = label
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                        style = if (tab == MainTab.TUTORS) {
-                                            MaterialTheme.typography.labelSmall.copy(fontSize = 8.5.sp, lineHeight = 10.sp)
-                                        } else {
-                                            MaterialTheme.typography.labelSmall
-                                        }
-                                    )
-                                },
-                                modifier = Modifier.testTag("nav_${tab.name.lowercase()}")
-                            )
-                        }
-                    }
-                }
-            }
-        ) { innerPadding ->
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                if (useRail) {
-                    NavigationRail {
-                        railItems.forEach { (tab, label, icons) ->
-                            val selected = selectedTab == tab
-                            NavigationRailItem(
-                                selected = selected,
-                                onClick = { viewModel.selectTab(tab) },
-                                icon = {
-                                    Icon(
-                                        imageVector = if (selected) icons.first else icons.second,
-                                        contentDescription = label
-                                    )
-                                },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        maxLines = 2,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Box(modifier = Modifier.weight(1f).fillMaxSize()) {
-                    when (selectedTab) {
+    SkolquikMinimalShell(
+        selectedTab = selectedTab,
+        displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
+        userEmail = userEmail,
+        userRole = currentProfile?.role ?: "parent",
+        isPlatformAdmin = viewModel.isPlatformAdmin,
+        favoriteCount = favoriteSchoolIds.size,
+        snackbarHostState = snackbarHostState,
+        onSelectTab = viewModel::selectTab,
+        onOpenProfile = { showProfileEditor = true },
+        onSignOut = {
+            AuthManager.signOut(
+                credentialManager = credentialManager,
+                scope = scope
+            )
+        }
+    ) {
+        when (selectedTab) {
                         MainTab.DISCOVER -> DiscoverScreen(
                             schoolsUiState = schoolsState,
                             filteredSchools = filteredSchools,
                             filter = searchFilter,
                             isBusy = isBusy,
+                            isRefreshingHome = isHomeRefreshing,
                             isNetworkOnline = isNetworkOnline,
                             connectionLabel = connectionLabel,
                             externalDirectoryLoading = externalDirectoryLoading,
                             externalDirectoryError = externalDirectoryError,
+                            onlineGroundingLoading = onlineGroundingLoading,
+                            onlineGroundingError = onlineGroundingError,
                             isGeocodingLocation = isGeocodingLocation,
+                            onPullToRefreshHome = viewModel::refreshHomeFromPullDown,
                             onRefreshExternalSchools = viewModel::refreshExternalSchools,
+                            onSearchOnline = { viewModel.searchVerifiedSchoolsOnline() },
                             onGeocodeSearch = viewModel::geocodeAndMoveSearchCenter,
                             onUpdateFilter = viewModel::updateFilter,
                             onResetFilters = viewModel::resetFilters,
@@ -500,7 +341,24 @@ private fun AuthenticatedShell(
                                 viewModel.submitEnrollment(school, studentName, gradeApplying, notes, draft)
                             },
                             onClaimSchool = viewModel::startClaimingExternalSchool,
-                            onSeedSampleSchools = viewModel::seedSampleSchoolsAroundCenter,
+                            onSubmitExtraDetails = { school, feeMin, feeMax, curr, period, open, window, boarding, photos, notes, courses, grades, site, phone ->
+                                viewModel.submitOptionalSchoolDetails(
+                                    school = school,
+                                    feeMin = feeMin,
+                                    feeMax = feeMax,
+                                    feeCurrency = curr,
+                                    feePeriod = period,
+                                    admissionsOpen = open,
+                                    admissionWindow = window,
+                                    boardingOption = boarding,
+                                    photoUrls = photos,
+                                    extraNotes = notes,
+                                    coursesOffered = courses,
+                                    gradeLevels = grades,
+                                    websiteUrl = site,
+                                    contactPhone = phone
+                                )
+                            },
                             onRegisterSchoolClick = { viewModel.selectTab(MainTab.ADMIN) },
                             activeAdverts = activeAdvertsWithDistance.filter { it.advert.status == "ACTIVE" },
                             onOpenPaidAdverts = { viewModel.selectTab(MainTab.ADVERTS) },
@@ -511,6 +369,54 @@ private fun AuthenticatedShell(
                             selectedSchoolAnnouncementsState = selectedSchoolAnnouncementsState,
                             onSelectSchoolForDetail = viewModel::selectSchoolForDetail
                         )
+                        MainTab.DASHBOARD -> DashboardScreen(
+                            displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
+                            userRole = currentProfile?.role ?: "parent",
+                            filter = searchFilter,
+                            nearbySchools = filteredSchools,
+                            savedSchoolsCount = favoriteSchoolIds.size,
+                            enrollmentsState = parentEnrollmentsState,
+                            conversationCount = (conversationsState as? UiState.Success)?.data?.size ?: 0,
+                            onNavigateTab = viewModel::selectTab,
+                            onRefreshOnline = {
+                                viewModel.refreshHomeFromPullDown()
+                                viewModel.selectTab(MainTab.DISCOVER)
+                            },
+                            onBack = { viewModel.selectTab(MainTab.DISCOVER) }
+                        )
+                        MainTab.SAVED -> SavedSchoolsScreen(
+                            favoriteSchools = favoriteSchools,
+                            favoriteSchoolIds = favoriteSchoolIds,
+                            selectedSchoolDetailState = selectedSchoolDetailState,
+                            selectedSchoolAnnouncementsState = selectedSchoolAnnouncementsState,
+                            onSelectSchoolForDetail = viewModel::selectSchoolForDetail,
+                            onToggleFavoriteSchool = viewModel::toggleFavoriteSchool,
+                            onMessageAdmin = viewModel::openChatWithSchool,
+                            onSubmitEnrollment = { school, studentName, gradeApplying, notes, draft ->
+                                viewModel.submitEnrollment(school, studentName, gradeApplying, notes, draft)
+                            },
+                            onClaimSchool = viewModel::startClaimingExternalSchool,
+                            onSubmitExtraDetails = { school, feeMin, feeMax, curr, period, open, window, boarding, photos, notes, courses, grades, site, phone ->
+                                viewModel.submitOptionalSchoolDetails(
+                                    school = school,
+                                    feeMin = feeMin,
+                                    feeMax = feeMax,
+                                    feeCurrency = curr,
+                                    feePeriod = period,
+                                    admissionsOpen = open,
+                                    admissionWindow = window,
+                                    boardingOption = boarding,
+                                    photoUrls = photos,
+                                    extraNotes = notes,
+                                    coursesOffered = courses,
+                                    gradeLevels = grades,
+                                    websiteUrl = site,
+                                    contactPhone = phone
+                                )
+                            },
+                            onBrowseDiscover = { viewModel.selectTab(MainTab.DISCOVER) },
+                            onBack = { viewModel.selectTab(MainTab.DISCOVER) }
+                        )
                         MainTab.TUTORS -> ProgressiveTutorsScreen(
                             currentUserId = currentUserId,
                             defaultTeacherName = currentProfile?.displayName ?: userDisplayName.ifBlank { "Tutor" },
@@ -520,6 +426,8 @@ private fun AuthenticatedShell(
                             clientSessionsState = clientTutorSessionsState,
                             teacherSessionsState = teacherTutorSessionsState,
                             isBusy = isBusy,
+                            onlineTutorsLoading = onlineTutorsLoading,
+                            onlineTutorsError = onlineTutorsError,
                             onUpdateFilter = viewModel::updateTutorFilter,
                             onResetFilters = viewModel::resetTutorFilters,
                             onSaveTutorProfile = { tutor, isNew ->
@@ -530,7 +438,7 @@ private fun AuthenticatedShell(
                             },
                             onPayForSession = viewModel::payForTutorSession,
                             onUpdateSessionStatus = viewModel::updateTutorSessionStatus,
-                            onSeedSampleTutors = viewModel::seedSampleTutors
+                            onDiscoverOnlineTutors = { viewModel.discoverRealTutorsOnline() }
                         )
                         MainTab.MESSAGES -> MessagesScreen(
                             currentUserId = currentUserId,
@@ -613,7 +521,6 @@ private fun AuthenticatedShell(
                             onPayExistingAdvert = viewModel::payForExistingAdvert,
                             onUpdateAdvertStatus = viewModel::updateAdvertStatus,
                             onDeleteAdvert = viewModel::deleteAdvert,
-                            onSeedSampleAdverts = viewModel::seedSampleAdverts,
                             onSubmitInquiry = viewModel::submitAdvertInquiry,
                             onUpdateInquiryStatus = viewModel::updateAdvertInquiryStatus,
                             onNavigateToSchools = { viewModel.selectTab(MainTab.DISCOVER) },
@@ -632,9 +539,39 @@ private fun AuthenticatedShell(
                             onClearChat = viewModel::clearAiAdvisorChat,
                             onBack = { viewModel.selectTab(MainTab.DISCOVER) }
                         )
-                    }
-                }
-            }
+                        MainTab.SETTINGS -> SettingsPrivacyScreen(
+                            themeSettings = themeSettings,
+                            latitude = searchFilter.centerLat,
+                            longitude = searchFilter.centerLng,
+                            locationLabel = searchFilter.centerLabel,
+                            displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
+                            userEmail = userEmail,
+                            onSelectAppearanceMode = { mode ->
+                                scope.launch { themeStore.setAppearanceMode(mode) }
+                            },
+                            onSelectHighlightHue = { hue ->
+                                scope.launch { themeStore.setHighlightHue(hue) }
+                            },
+                            onToggleAutoOnlineDiscovery = { enabled ->
+                                scope.launch { themeStore.setAutoOnlineDiscovery(enabled) }
+                            },
+                            onTogglePreciseLocation = { enabled ->
+                                scope.launch { themeStore.setPreciseLocation(enabled) }
+                            },
+                            onOpenProfile = { showProfileEditor = true },
+                            onSignOut = {
+                                AuthManager.signOut(
+                                    credentialManager = credentialManager,
+                                    scope = scope
+                                )
+                            },
+                            onBack = { viewModel.selectTab(MainTab.DISCOVER) }
+                        )
+                        MainTab.HELP -> HelpSupportScreen(
+                            onOpenAiAdvisor = { viewModel.selectTab(MainTab.AI_ADVISOR) },
+                            onOpenSettings = { viewModel.selectTab(MainTab.SETTINGS) },
+                            onBack = { viewModel.selectTab(MainTab.DISCOVER) }
+                        )
         }
     }
 

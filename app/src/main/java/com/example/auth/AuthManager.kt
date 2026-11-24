@@ -37,21 +37,25 @@ object AuthManager {
             return
         }
         val clientId = try {
-            context.getString(R.string.default_web_client_id)
+            context.getString(R.string.default_web_client_id).trim()
         } catch (_: Exception) {
             onUnauthenticated()
             return
         }
-        val googleIdOption = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(true)
-            .setServerClientId(clientId)
-            .setAutoSelectEnabled(true)
-            .build()
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(googleIdOption)
-            .build()
+        if (clientId.isEmpty()) {
+            onUnauthenticated()
+            return
+        }
         scope.launch {
             try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(true)
+                    .setServerClientId(clientId)
+                    .setAutoSelectEnabled(true)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
                 val cred = credentialManager.getCredential(context, request).credential
                 if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val token = GoogleIdTokenCredential.createFrom(cred.data).idToken
@@ -75,9 +79,13 @@ object AuthManager {
         onAuthCancelled: () -> Unit = {}
     ) {
         val clientId = try {
-            context.getString(R.string.default_web_client_id)
+            context.getString(R.string.default_web_client_id).trim()
         } catch (_: Exception) {
             onAuthError("Google Sign-In configuration missing: default_web_client_id not found")
+            return
+        }
+        if (clientId.isEmpty()) {
+            onAuthError("Google Sign-In configuration missing: default_web_client_id is empty")
             return
         }
         val activity = context as? Activity
@@ -85,12 +93,12 @@ object AuthManager {
             onAuthError("Unable to launch Google Sign-In without an Activity context")
             return
         }
-        val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(signInOption)
-            .build()
         scope.launch {
             try {
+                val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInOption)
+                    .build()
                 val cred = credentialManager.getCredential(activity, request).credential
                 if (cred is CustomCredential && cred.type == TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     val token = GoogleIdTokenCredential.createFrom(cred.data).idToken

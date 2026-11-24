@@ -105,14 +105,7 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    )
-                )
-            )
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -125,11 +118,15 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                 .align(Alignment.TopCenter),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Opening Skolquik Logo + Tagline Brand Card
+            // Opening Skolquik Logo + Tagline Brand Card on crisp pure white so theme never overshadows the logo
             Surface(
                 shape = MaterialTheme.shapes.large,
                 color = Color.White,
-                shadowElevation = 3.dp,
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
+                ),
+                shadowElevation = 2.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("opening_brand_logo")
@@ -148,7 +145,7 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(170.dp)
+                    .height(164.dp)
                     .clip(MaterialTheme.shapes.large)
             ) {
                 Image(
@@ -162,7 +159,7 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.Transparent, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f))
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
                             )
                         )
                 )
@@ -173,14 +170,21 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_launcher_foreground),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                    )
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_launcher_foreground),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(4.dp)
+                                .clip(CircleShape)
+                        )
+                    }
                     Column {
                         Text(
                             text = stringResource(R.string.app_name),
@@ -199,7 +203,7 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "Every school detail, mapped around you.",
+                    text = "Every verified school, mapped around you.",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onBackground
                 )
@@ -213,18 +217,18 @@ fun AuthScreen(onAuthSuccess: (preferAdminPortal: Boolean) -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 FeatureHighlightRow(
                     icon = Icons.Filled.Explore,
-                    title = "Live Street & Google Maps Discovery",
-                    subtitle = "Search by radius, Nigerian/British/Dual curricula, fee ranges, faith, special needs, courses & sports."
+                    title = "Verified Schools via Google Search & Maps",
+                    subtitle = "Explore real schools instantly with radius filters, curricula, source citations, and admissions links."
                 )
                 FeatureHighlightRow(
                     icon = Icons.AutoMirrored.Filled.Chat,
-                    title = "Direct Messaging, Tutors & Payments",
-                    subtitle = "Book Progressive Tutors, launch 4×2 paid adverts, and settle fees securely with digital receipts."
+                    title = "Skolquik AI, Progressive Tutors & Adverts",
+                    subtitle = "Ask grounded AI advisors, find vetted tutoring centres, and submit inquiries in seconds."
                 )
                 FeatureHighlightRow(
                     icon = Icons.Filled.Lock,
-                    title = "Admin Hub & Platform Oversight",
-                    subtitle = "Track student attendance, grades, enrollments, and full platform activity."
+                    title = "Personal Dashboard & Customizable Theme",
+                    subtitle = "Save shortlists, track enrollments, and personalize white, dark, or sunrise/sunset themes."
                 )
             }
 

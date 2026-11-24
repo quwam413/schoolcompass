@@ -80,7 +80,6 @@ fun PaidAdvertsScreen(
     onPayExistingAdvert: (Advert, PaymentSubmissionDraft) -> Unit = { _, _ -> },
     onUpdateAdvertStatus: (String, String) -> Unit,
     onDeleteAdvert: (String) -> Unit,
-    onSeedSampleAdverts: () -> Unit,
     onSubmitInquiry: (Advert, String, String, String?, String, () -> Unit) -> Unit = { _, _, _, _, _, _ -> },
     onUpdateInquiryStatus: (String, String) -> Unit = { _, _ -> },
     onNavigateToSchools: () -> Unit,
@@ -248,10 +247,10 @@ fun PaidAdvertsScreen(
                         item {
                             EmptyStateCard(
                                 icon = Icons.Filled.Campaign,
-                                title = "No active paid adverts yet",
-                                subtitle = "Promote admissions, sports camps, or Progressive Tutors campaigns, or load sample sponsored listings.",
-                                actionLabel = if (isBusy) "Loading…" else "Load Sample Adverts",
-                                onAction = { if (!isBusy) onSeedSampleAdverts() }
+                                title = "No live sponsored campaigns yet",
+                                subtitle = "Verified schools appear live in Discover via Google Search & Maps. Launch a real campaign to spotlight open admissions here.",
+                                actionLabel = "Browse Verified Schools",
+                                onAction = onNavigateToSchools
                             )
                         }
                     } else {

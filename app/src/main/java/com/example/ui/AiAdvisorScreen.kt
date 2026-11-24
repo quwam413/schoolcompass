@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
@@ -49,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -325,8 +327,10 @@ fun AiAdvisorScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AiChatBubble(message: AiAdvisorMessage) {
+    val uriHandler = LocalUriHandler.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
@@ -401,7 +405,7 @@ private fun AiChatBubble(message: AiAdvisorMessage) {
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Text(
-                            text = "Grounding with Google Maps & thinking…",
+                            text = "Grounding with Google Search & Maps…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -416,6 +420,34 @@ private fun AiChatBubble(message: AiAdvisorMessage) {
                             MaterialTheme.colorScheme.onSurface
                         }
                     )
+                }
+
+                if (!message.isUser && message.groundingLinks.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        message.groundingLinks.take(6).forEach { link ->
+                            SuggestionChip(
+                                onClick = { runCatching { uriHandler.openUri(link.uri) } },
+                                icon = {
+                                    Icon(
+                                        imageVector = if (link.sourceType == "Google Maps") Icons.Filled.Map else Icons.Filled.Public,
+                                        contentDescription = "Open ${link.sourceType} citation",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = "${link.sourceType}: ${link.title}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }

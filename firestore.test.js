@@ -738,4 +738,125 @@ test("Bootstrapped super-admin can list users, enrollments, and payments for pla
   await assertSucceeds(superAdmin.collection("tutor_sessions").get());
 });
 
+test("Verified online schools save without registration gate, allow lightweight optional enrichment, in-place claim, and parent inquiries", async () => {
+  const parent = testEnv.authenticatedContext(PARENT_UID).firestore();
+  const claimingAdmin = testEnv.authenticatedContext(ADMIN_UID).firestore();
+  const hijacker = testEnv.authenticatedContext(OTHER_PARENT_UID).firestore();
+  const ts = pastDate(5000);
+
+  const verifiedOnlinePayload = {
+    adminUid: "",
+    adminName: "",
+    name: "Corona Secondary School, Agbara",
+    description: "Verified online secondary boarding school.",
+    address: "Agbara Estate, Ogun State",
+    latitude: 6.5042,
+    longitude: 3.1031,
+    curriculum: "Nigerian & British",
+    institutionType: "Primary & Secondary",
+    faithBased: false,
+    faithTradition: "Secular",
+    specialSchool: false,
+    specialNeedsSupport: "General Education",
+    studentMix: "Mixed",
+    gradeLevels: ["Junior Secondary", "Senior Secondary"],
+    coursesOffered: ["WAEC", "IGCSE"],
+    activities: [],
+    sportsFocus: [],
+    feeMin: 0,
+    feeMax: 0,
+    feeCurrency: "NGN",
+    feePeriod: "Per Term",
+    rankingScore: 86.0,
+    districtRank: 15,
+    rating: 4.6,
+    tuitionTier: "$$",
+    capacity: 600,
+    enrolledCount: 0,
+    admissionsOpen: true,
+    websiteUrl: "https://coronaschools.org",
+    verificationStatus: "VERIFIED_ONLINE",
+    verificationSource: "Google Search & Maps Grounding",
+    sourceCitations: [
+      "[Google Search] Corona Schools Official | https://coronaschools.org",
+      "[Google Maps] Corona Secondary School | https://www.google.com/maps/place/?q=place_id:ChIJcorona"
+    ],
+    googleMapsPlaceRef: "places/ChIJcorona",
+    googleMapsUrl: "https://www.google.com/maps/place/?q=place_id:ChIJcorona",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+
+  // Creating an unclaimed VERIFIED_ONLINE school succeeds
+  await assertSucceeds(
+    parent.collection("schools").doc("gmaps_ChIJcorona").set(verifiedOnlinePayload)
+  );
+
+  // Creating an unclaimed UNVERIFIED school without adminUid must fail
+  await assertFails(
+    parent.collection("schools").doc("bad_unclaimed").set({
+      ...verifiedOnlinePayload,
+      verificationStatus: "UNVERIFIED",
+    })
+  );
+
+  // Any signed-in user can submit optional extra details (tuition bracket, admission window, boarding, photos)
+  await assertSucceeds(
+    parent.collection("schools").doc("gmaps_ChIJcorona").update({
+      feeMin: 850000,
+      feeMax: 1200000,
+      tuitionTier: "$$$",
+      admissionWindow: "Sept 2026 Intake Open",
+      boardingOption: "Boarding",
+      photoUrls: ["https://coronaschools.org/campus.jpg"],
+      extraNotes: "Entrance exams hold in March and May.",
+      lastEnrichedByName: "Alice Parent",
+      updatedAt: pastDate(3000),
+    })
+  );
+
+  // Community enrichment cannot change core identity fields (name, latitude, adminUid)
+  await assertFails(
+    parent.collection("schools").doc("gmaps_ChIJcorona").update({
+      name: "Tampered School Name",
+      updatedAt: pastDate(2500),
+    })
+  );
+
+  // Parent can submit an immediate enrollment inquiry even before school registers
+  await assertSucceeds(
+    parent.collection("enrollments").doc("enr_online_1").set({
+      schoolId: "gmaps_ChIJcorona",
+      schoolName: "Corona Secondary School, Agbara",
+      adminUid: "",
+      parentUid: PARENT_UID,
+      parentName: "Alice Parent",
+      studentName: "Tomiwa",
+      gradeApplying: "Junior Secondary",
+      notes: "Requesting September 2026 admission pack.",
+      status: "PENDING",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Optional claiming sets adminUid in place on existing verified-online doc
+  await assertSucceeds(
+    claimingAdmin.collection("schools").doc("gmaps_ChIJcorona").update({
+      adminUid: ADMIN_UID,
+      adminName: "Corona Admissions",
+      updatedAt: pastDate(1500),
+    })
+  );
+
+  // Once claimed, another user cannot hijack adminUid
+  await assertFails(
+    hijacker.collection("schools").doc("gmaps_ChIJcorona").update({
+      adminUid: OTHER_PARENT_UID,
+      adminName: "Hijacker",
+      updatedAt: pastDate(500),
+    })
+  );
+});
+
 
