@@ -10,26 +10,46 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 import kotlin.math.roundToInt
 
 class SchoolRepository(
     private val db: FirebaseFirestore,
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth = Firebase.auth,
+    private val cloudSqlClient: CloudSqlSyncClient = CloudSqlSyncClient()
 ) {
+    private val sqlSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     constructor(context: Context) : this(
         FirebaseFirestore.getInstance(
             context.applicationContext.getString(R.string.firestore_database_id)
         )
     )
+
+    suspend fun checkCloudSqlHealth(): CloudSqlConnectionStatus = cloudSqlClient.checkHealth()
+
+    suspend fun fetchSchoolsFromCloudSql(
+        lat: Double? = null,
+        lng: Double? = null,
+        radiusKm: Int? = null
+    ): Result<List<School>> = cloudSqlClient.fetchSchoolsFromSql(lat, lng, radiusKm)
+
+    suspend fun syncSchoolsBatchToCloudSql(schools: List<School>): Result<Int> =
+        cloudSqlClient.syncSchoolsBatchToSql(schools)
 
     private fun requireUserId(): String {
         return auth.currentUser?.uid?.takeIf { it.isNotBlank() }
@@ -317,6 +337,20 @@ class SchoolRepository(
                 if (cleanChild != null) updates["childSummary"] = cleanChild
                 docRef.update(updates).await()
             }
+            sqlSyncScope.launch {
+                cloudSqlClient.syncUserProfileToSql(
+                    uid = uid,
+                    role = role,
+                    displayName = cleanName,
+                    email = email.trim().take(120),
+                    phone = cleanPhone,
+                    homeAddress = cleanAddr,
+                    homeLat = homeLat.coerceIn(-90.0, 90.0),
+                    homeLng = homeLng.coerceIn(-180.0, 180.0),
+                    searchRadiusKm = searchRadiusKm.coerceIn(1, 100),
+                    childSummary = cleanChild
+                )
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -524,6 +558,11 @@ class SchoolRepository(
                         }
                     }
                 }
+            }
+            sqlSyncScope.launch {
+                cloudSqlClient.syncSchoolsBatchToSql(
+                    schools.take(15).map { raw -> raw.copy(id = resolveFirestoreSchoolId(raw)) }
+                )
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -838,6 +877,20 @@ class SchoolRepository(
             ).filterValues { it != null }
 
             db.collection("enrollments").document(enrollmentId).set(payload).await()
+            sqlSyncScope.launch {
+                cloudSqlClient.syncEnrollmentToSql(
+                    enrollmentId = enrollmentId,
+                    schoolId = persistedSchoolId,
+                    schoolName = school.name.take(100),
+                    adminUid = effectiveAdminUid,
+                    parentUid = uid,
+                    parentName = parentName.trim().ifEmpty { "Parent" }.take(80),
+                    studentName = cleanStudent,
+                    gradeApplying = cleanGrade,
+                    notes = cleanNotes,
+                    status = "PENDING"
+                )
+            }
             Result.success(enrollmentId)
         } catch (e: CancellationException) {
             throw e
@@ -1032,7 +1085,7 @@ class SchoolRepository(
             val allGrades = studentRef.collection("grades")
                 .whereEqualTo("adminUid", uid)
                 .get().await()
-                .toObjects(SubjectGrade::class.java)
+                .toObjects(SubjectGrade::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
             val avg = if (allGrades.isNotEmpty()) {
                 allGrades.map { it.score }.average().coerceIn(0.0, 100.0)
             } else clampedScore
@@ -1138,6 +1191,16 @@ class SchoolRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
+            sqlSyncScope.launch {
+                cloudSqlClient.syncMessageToSql(
+                    conversation = conversation,
+                    messageId = msgId,
+                    senderUid = uid,
+                    senderName = senderName.trim().ifEmpty { "User" }.take(80),
+                    senderRole = if (senderRole == "admin") "admin" else "parent",
+                    text = cleanText
+                )
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -1528,5 +1591,190 @@ class SchoolRepository(
             Result.failure(e)
         }
     }
+
+    fun observeIsDelegatedAdmin(userId: String): Flow<Boolean> = flow {
+        val uid = requireUserId()
+        if (uid != userId) throw IllegalStateException("User session mismatch")
+        val path = "platform_admins/$uid"
+        emitAll(
+            db.collection("platform_admins").document(uid)
+                .snapshots()
+                .map { snapshot -> snapshot.exists() }
+                .logFirestoreErrors(OperationType.GET, path, uid)
+        )
+    }
+
+    fun observePlatformAdmins(): Flow<List<PlatformAdminRecord>> = flow {
+        val uid = requireUserId()
+        val path = "platform_admins"
+        emitAll(
+            db.collection(path)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(PlatformAdminRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .logFirestoreErrors(OperationType.LIST, path, uid)
+        )
+    }
+
+    fun observeAppVisitStats(): Flow<AppVisitStats?> = flow {
+        val uid = requireUserId()
+        val path = "app_analytics/visits_summary"
+        emitAll(
+            db.collection("app_analytics").document("visits_summary")
+                .snapshots()
+                .map { snapshot ->
+                    if (snapshot.exists()) {
+                        snapshot.toObject(AppVisitStats::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                    } else {
+                        AppVisitStats(id = "visits_summary", totalVisits = 0L, androidVisits = 0L, webVisits = 0L)
+                    }
+                }
+                .logFirestoreErrors(OperationType.GET, path, uid)
+        )
+    }
+
+    fun observeRecentVisitLogs(limitCount: Long = 100L): Flow<List<AppVisitLog>> = flow {
+        val uid = requireUserId()
+        val path = "visit_logs"
+        emitAll(
+            db.collection(path)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(limitCount)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(AppVisitLog::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .logFirestoreErrors(OperationType.LIST, path, uid)
+        )
+    }
+
+    suspend fun recordAppVisit(
+        userEmail: String,
+        displayName: String,
+        role: String,
+        platform: String = "android"
+    ): Result<String> {
+        val visitId = "vis_${UUID.randomUUID().toString().replace("-", "").take(16)}"
+        val logPath = "visit_logs/$visitId"
+        return try {
+            val uid = requireUserId()
+            val safePlatform = if (platform == "web") "web" else "android"
+            val safeRole = if (role == "admin") "admin" else "parent"
+            val cleanName = displayName.trim().ifEmpty { "Skolquik Member" }.take(80)
+            val cleanEmail = userEmail.trim().take(120)
+
+            val summaryPayload = mapOf(
+                "totalVisits" to FieldValue.increment(1L),
+                "androidVisits" to FieldValue.increment(if (safePlatform == "android") 1L else 0L),
+                "webVisits" to FieldValue.increment(if (safePlatform == "web") 1L else 0L),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("app_analytics").document("visits_summary")
+                .set(summaryPayload, SetOptions.merge())
+                .await()
+
+            val logPayload = mapOf(
+                "userId" to uid,
+                "userEmail" to cleanEmail,
+                "displayName" to cleanName,
+                "role" to safeRole,
+                "platform" to safePlatform,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("visit_logs").document(visitId).set(logPayload).await()
+
+            sqlSyncScope.launch {
+                cloudSqlClient.recordVisitToSql(
+                    visitId = visitId,
+                    userId = uid,
+                    userEmail = cleanEmail,
+                    displayName = cleanName,
+                    role = safeRole,
+                    platform = safePlatform
+                )
+            }
+            Result.success(visitId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, logPath)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun grantPlatformAdmin(
+        targetUser: UserProfile,
+        grantedByEmail: String
+    ): Result<Unit> {
+        val targetUid = targetUser.userId.ifBlank { targetUser.id }.trim()
+        val path = "platform_admins/$targetUid"
+        return try {
+            val ownerUid = requireUserId()
+            require(targetUid.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))) { "Invalid user ID" }
+            val cleanEmail = targetUser.email.trim().take(120)
+            require(cleanEmail.length >= 3) { "User must have a valid email address" }
+            val cleanName = targetUser.displayName.trim().ifEmpty { cleanEmail }.take(80)
+            val cleanOwnerEmail = grantedByEmail.trim().ifEmpty { SchoolConstants.PLATFORM_ADMIN_EMAIL }.take(120)
+
+            val payload = mapOf(
+                "userId" to targetUid,
+                "email" to cleanEmail,
+                "displayName" to cleanName,
+                "grantedByUid" to ownerUid,
+                "grantedByEmail" to cleanOwnerEmail,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("platform_admins").document(targetUid).set(payload).await()
+
+            sqlSyncScope.launch {
+                cloudSqlClient.setDelegatedAdminOnSql(
+                    targetUserId = targetUid,
+                    targetEmail = cleanEmail,
+                    targetDisplayName = cleanName,
+                    grant = true
+                )
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun revokePlatformAdmin(
+        targetUserId: String,
+        targetEmail: String,
+        targetName: String
+    ): Result<Unit> {
+        val cleanTargetUid = targetUserId.trim()
+        val path = "platform_admins/$cleanTargetUid"
+        return try {
+            requireUserId()
+            require(cleanTargetUid.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))) { "Invalid user ID" }
+            db.collection("platform_admins").document(cleanTargetUid).delete().await()
+
+            sqlSyncScope.launch {
+                cloudSqlClient.setDelegatedAdminOnSql(
+                    targetUserId = cleanTargetUid,
+                    targetEmail = targetEmail,
+                    targetDisplayName = targetName,
+                    grant = false
+                )
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchCloudSqlAdminOverview(): Result<CloudSqlAdminOverview> =
+        cloudSqlClient.fetchAdminOverviewFromSql()
 
 }

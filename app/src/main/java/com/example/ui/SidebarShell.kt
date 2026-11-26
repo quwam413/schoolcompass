@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.AutoAwesome
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.outlined.CastForEducation
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FamilyRestroom
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.DrawerValue
@@ -164,21 +166,36 @@ fun SkolquikMinimalShell(
         )
     )
 
-    val manageItems = listOf(
-        SidebarDestination(
-            tab = MainTab.ADVERTS,
-            label = stringResource(R.string.tab_adverts),
-            selectedIcon = Icons.Filled.Campaign,
-            unselectedIcon = Icons.Outlined.Campaign
-        ),
-        SidebarDestination(
-            tab = MainTab.ADMIN,
-            label = stringResource(R.string.tab_admin),
-            selectedIcon = Icons.Filled.AdminPanelSettings,
-            unselectedIcon = Icons.Outlined.AdminPanelSettings,
-            badgeText = if (isPlatformAdmin) "Oversight" else null
+    val manageItems = buildList {
+        add(
+            SidebarDestination(
+                tab = MainTab.ADVERTS,
+                label = stringResource(R.string.tab_adverts),
+                selectedIcon = Icons.Filled.Campaign,
+                unselectedIcon = Icons.Outlined.Campaign
+            )
         )
-    )
+        add(
+            SidebarDestination(
+                tab = MainTab.ADMIN,
+                label = stringResource(R.string.tab_admin),
+                selectedIcon = Icons.Filled.AdminPanelSettings,
+                unselectedIcon = Icons.Outlined.AdminPanelSettings,
+                badgeText = if (isPlatformAdmin) "Oversight" else null
+            )
+        )
+        if (isPlatformAdmin) {
+            add(
+                SidebarDestination(
+                    tab = MainTab.PLATFORM_ADMIN,
+                    label = stringResource(R.string.tab_platform_admin),
+                    selectedIcon = Icons.Filled.Security,
+                    unselectedIcon = Icons.Outlined.Security,
+                    badgeText = "Admin"
+                )
+            )
+        }
+    }
 
     val supportItems = listOf(
         SidebarDestination(
@@ -205,6 +222,7 @@ fun SkolquikMinimalShell(
         MainTab.PORTAL -> stringResource(R.string.tab_portal)
         MainTab.ADVERTS -> stringResource(R.string.tab_adverts)
         MainTab.ADMIN -> stringResource(R.string.tab_admin)
+        MainTab.PLATFORM_ADMIN -> stringResource(R.string.tab_platform_admin)
         MainTab.SETTINGS -> stringResource(R.string.tab_settings)
         MainTab.HELP -> stringResource(R.string.tab_help)
     }

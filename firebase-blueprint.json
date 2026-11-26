@@ -359,6 +359,46 @@
         "paymentMethod", "gatewayProvider", "gatewayReference", "receiptNumber",
         "status", "createdAt", "updatedAt"
       ]
+    },
+    "PlatformAdmin": {
+      "title": "PlatformAdmin",
+      "description": "Delegated platform administrator record granted by the primary platform owner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "grantedByUid": { "type": "string" },
+        "grantedByEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "displayName", "grantedByUid", "grantedByEmail", "createdAt"]
+    },
+    "AppVisitStats": {
+      "title": "AppVisitStats",
+      "description": "Cumulative app visit counts across Android and Web.",
+      "type": "object",
+      "properties": {
+        "totalVisits": { "type": "integer" },
+        "androidVisits": { "type": "integer" },
+        "webVisits": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["totalVisits", "androidVisits", "webVisits", "updatedAt"]
+    },
+    "VisitLog": {
+      "title": "VisitLog",
+      "description": "Individual app visit event logged on session open.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["parent", "admin"] },
+        "platform": { "type": "string", "enum": ["android", "web"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userEmail", "displayName", "role", "platform", "createdAt"]
     }
   },
   "firestore": {
@@ -417,6 +457,18 @@
     "/payments/{paymentId}": {
       "schema": { "$ref": "#/entities/PaymentTransaction" },
       "description": "Verified payment records and receipts for school fees, adverts, and tutoring."
+    },
+    "/platform_admins/{userId}": {
+      "schema": { "$ref": "#/entities/PlatformAdmin" },
+      "description": "Delegated platform administrators authorized to access the Platform Admin portal."
+    },
+    "/app_analytics/{metricId}": {
+      "schema": { "$ref": "#/entities/AppVisitStats" },
+      "description": "Aggregate visit counters across Android and Web."
+    },
+    "/visit_logs/{visitId}": {
+      "schema": { "$ref": "#/entities/VisitLog" },
+      "description": "Per-session app visit records restricted to platform admins."
     }
   }
 }

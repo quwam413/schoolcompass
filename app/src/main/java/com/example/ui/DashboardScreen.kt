@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.CastForEducation
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.Button
@@ -59,6 +60,7 @@ fun DashboardScreen(
     savedSchoolsCount: Int,
     enrollmentsState: UiState<List<Enrollment>>,
     conversationCount: Int,
+    isPlatformAdmin: Boolean = false,
     onNavigateTab: (MainTab) -> Unit,
     onRefreshOnline: () -> Unit,
     onBack: () -> Unit
@@ -221,6 +223,15 @@ fun DashboardScreen(
                     onClick = { onNavigateTab(MainTab.SETTINGS) },
                     testTag = "dashboard_quick_settings"
                 )
+                if (isPlatformAdmin) {
+                    DashboardActionRow(
+                        icon = Icons.Filled.Security,
+                        title = "Platform Admin",
+                        subtitle = "View signed-up individuals & schools, app visits, and manage admins",
+                        onClick = { onNavigateTab(MainTab.PLATFORM_ADMIN) },
+                        testTag = "dashboard_quick_platform_admin"
+                    )
+                }
             }
         }
 

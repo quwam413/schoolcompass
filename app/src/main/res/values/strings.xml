@@ -9,6 +9,7 @@
     <string name="tab_messages">Messages</string>
     <string name="tab_portal">Portal</string>
     <string name="tab_admin">School Hub</string>
+    <string name="tab_platform_admin">Platform Admin</string>
     <string name="tab_progressive_tutors">Progressive Tutors</string>
     <string name="tab_adverts">Sponsored Adverts</string>
     <string name="tab_ai_advisor">Skolquik AI</string>

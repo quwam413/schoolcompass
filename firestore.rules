@@ -27,8 +27,37 @@ service cloud.firestore {
 
     function isBootstrappedAdmin() {
       return isSignedIn() &&
+        'email' in request.auth.token &&
         request.auth.token.email == 'elebutequam413@gmail.com' &&
+        'email_verified' in request.auth.token &&
         request.auth.token.email_verified == true;
+    }
+
+    function isDelegatedAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/platform_admins/$(request.auth.uid));
+    }
+
+    function isPlatformAdmin() {
+      return isBootstrappedAdmin() || isDelegatedAdmin();
+    }
+
+    function isValidPlatformAdmin(data) {
+      return data.userId is string && isValidId(data.userId) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.grantedByUid is string && isValidId(data.grantedByUid) &&
+        data.grantedByEmail is string && data.grantedByEmail.size() >= 3 && data.grantedByEmail.size() <= 120 &&
+        data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidVisitLog(data) {
+      return data.userId is string && isValidId(data.userId) &&
+        data.userEmail is string && data.userEmail.size() <= 120 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.role in ['parent', 'admin'] &&
+        data.platform in ['android', 'web'] &&
+        data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
     function isValidUserProfile(data) {
@@ -98,39 +127,45 @@ service cloud.firestore {
         data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
 
+    function isAllowedSchoolKeys(keys) {
+      return keys.hasOnly([
+        'adminUid', 'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
+        'curriculum', 'institutionType', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
+        'studentMix', 'gradeLevels', 'coursesOffered', 'activities', 'sportsFocus', 'feeMin', 'feeMax',
+        'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
+        'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
+        'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
+        'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
+        'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
+        'createdAt', 'updatedAt'
+      ]);
+    }
+
     function isAllowedSchoolUpdate(diffKeys) {
-      return (
+      return !diffKeys.hasAny(['createdAt']) &&
         (
           (
-            ((existing().adminUid == request.auth.uid || isBootstrappedAdmin()) && incoming().adminUid == existing().adminUid) ||
-            (existing().adminUid == '' && incoming().adminUid == request.auth.uid)
-          ) &&
-          diffKeys.hasOnly([
-            'adminUid', 'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
-            'curriculum', 'institutionType', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
-            'studentMix', 'gradeLevels', 'coursesOffered', 'activities', 'sportsFocus', 'feeMin', 'feeMax',
-            'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
-            'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
-            'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
-            'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
-            'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
-            'updatedAt'
-          ])
-        ) || (
-          incoming().adminUid == existing().adminUid &&
-          diffKeys.hasOnly([
-            'feeMin', 'feeMax', 'feeCurrency', 'feePeriod', 'tuitionTier',
-            'admissionsOpen', 'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes',
-            'coursesOffered', 'gradeLevels', 'activities', 'sportsFocus',
-            'websiteUrl', 'contactPhone', 'description', 'lastEnrichedByName', 'updatedAt',
-            'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'
-          ]) &&
+            incoming().adminUid == existing().adminUid &&
+            diffKeys.hasOnly([
+              'feeMin', 'feeMax', 'feeCurrency', 'feePeriod', 'tuitionTier',
+              'admissionsOpen', 'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes',
+              'coursesOffered', 'gradeLevels', 'activities', 'sportsFocus',
+              'websiteUrl', 'contactPhone', 'description', 'lastEnrichedByName', 'updatedAt',
+              'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'
+            ]) &&
+            (
+              existing().adminUid == '' ||
+              !diffKeys.hasAny(['sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'])
+            )
+          ) ||
           (
-            existing().adminUid == '' ||
-            !diffKeys.hasAny(['sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl', 'verificationStatus', 'verificationSource'])
+            (
+              (existing().adminUid == '' && incoming().adminUid == request.auth.uid) ||
+              (incoming().adminUid == existing().adminUid && (existing().adminUid == request.auth.uid || isPlatformAdmin()))
+            ) &&
+            isAllowedSchoolKeys(incoming().keys())
           )
-        )
-      );
+        );
     }
 
     function isValidEnrollment(data) {
@@ -328,8 +363,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isValidId(userId) && (isOwner(userId) || isBootstrappedAdmin());
-      allow list: if isBootstrappedAdmin();
+      allow get: if isValidId(userId) && (isOwner(userId) || isPlatformAdmin());
+      allow list: if isPlatformAdmin();
 
       allow create: if isValidId(userId) &&
         isOwner(userId) &&
@@ -367,18 +402,7 @@ service cloud.firestore {
           'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
           'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'createdAt', 'updatedAt'
         ]) &&
-        incoming().keys().hasOnly([
-          'adminUid', 'adminName', 'name', 'description', 'address', 'latitude', 'longitude',
-          'curriculum', 'faithBased', 'faithTradition', 'specialSchool', 'specialNeedsSupport',
-          'studentMix', 'gradeLevels', 'activities', 'sportsFocus', 'feeMin', 'feeMax',
-          'feeCurrency', 'feePeriod', 'rankingScore', 'districtRank', 'rating',
-          'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
-          'institutionType', 'coursesOffered',
-          'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
-          'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
-          'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
-          'createdAt', 'updatedAt'
-        ]);
+        isAllowedSchoolKeys(incoming().keys());
 
       allow update: if isSignedIn() &&
         isValidId(schoolId) &&
@@ -386,14 +410,14 @@ service cloud.firestore {
         isAllowedSchoolUpdate(incoming().diff(existing()).affectedKeys()) &&
         isValidSchool(incoming());
 
-      allow delete: if isSignedIn() && isValidId(schoolId) && (existing().adminUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(schoolId) && (existing().adminUid == request.auth.uid || isPlatformAdmin());
     }
 
     match /enrollments/{enrollmentId} {
       allow get: if isSignedIn() && isValidId(enrollmentId) &&
-        (existing().parentUid == request.auth.uid || existing().adminUid == request.auth.uid || isBootstrappedAdmin());
+        (existing().parentUid == request.auth.uid || existing().adminUid == request.auth.uid || isPlatformAdmin());
       allow list: if isSignedIn() &&
-        (resource.data.parentUid == request.auth.uid || resource.data.adminUid == request.auth.uid || isBootstrappedAdmin());
+        (resource.data.parentUid == request.auth.uid || resource.data.adminUid == request.auth.uid || isPlatformAdmin());
 
       allow create: if isSignedIn() &&
         isValidId(enrollmentId) &&
@@ -420,7 +444,7 @@ service cloud.firestore {
         incoming().parentUid == existing().parentUid &&
         incoming().createdAt == existing().createdAt &&
         (
-          isBootstrappedAdmin() ||
+          isPlatformAdmin() ||
           (
             existing().adminUid == request.auth.uid &&
             existing().status != 'DECLINED' &&
@@ -439,9 +463,9 @@ service cloud.firestore {
 
     match /students/{studentId} {
       allow get: if isSignedIn() && isValidId(studentId) &&
-        (existing().parentUid == request.auth.uid || existing().adminUid == request.auth.uid || isBootstrappedAdmin());
+        (existing().parentUid == request.auth.uid || existing().adminUid == request.auth.uid || isPlatformAdmin());
       allow list: if isSignedIn() &&
-        (resource.data.parentUid == request.auth.uid || resource.data.adminUid == request.auth.uid || isBootstrappedAdmin());
+        (resource.data.parentUid == request.auth.uid || resource.data.adminUid == request.auth.uid || isPlatformAdmin());
 
       allow create: if isSignedIn() &&
         isValidId(studentId) &&
@@ -463,7 +487,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(studentId) &&
         isValidStudent(incoming()) &&
-        (existing().adminUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().adminUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().parentUid == existing().parentUid &&
         incoming().adminUid == existing().adminUid &&
         incoming().schoolId == existing().schoolId &&
@@ -472,7 +496,7 @@ service cloud.firestore {
           'gradeLevel', 'attendanceRate', 'presentDays', 'absentDays', 'tardyDays', 'gpa', 'overallAverage', 'updatedAt'
         ]);
 
-      allow delete: if isSignedIn() && isValidId(studentId) && (existing().adminUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(studentId) && (existing().adminUid == request.auth.uid || isPlatformAdmin());
 
       match /attendance/{logId} {
         allow get: if isSignedIn() && isValidId(studentId) && isValidId(logId) &&
@@ -594,13 +618,13 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(announcementId) &&
         isValidAnnouncement(incoming()) &&
-        (existing().adminUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().adminUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().schoolId == existing().schoolId &&
         incoming().adminUid == existing().adminUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'body', 'category', 'eventDate']);
 
-      allow delete: if isSignedIn() && isValidId(announcementId) && (existing().adminUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(announcementId) && (existing().adminUid == request.auth.uid || isPlatformAdmin());
     }
 
     match /adverts/{advertId} {
@@ -626,7 +650,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(advertId) &&
         isValidAdvert(incoming()) &&
-        (existing().ownerUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().ownerUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -635,14 +659,14 @@ service cloud.firestore {
           'longitude', 'ctaLabel', 'contactInfo', 'status', 'paymentId', 'paymentStatus', 'updatedAt'
         ]);
 
-      allow delete: if isSignedIn() && isValidId(advertId) && (existing().ownerUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(advertId) && (existing().ownerUid == request.auth.uid || isPlatformAdmin());
     }
 
     match /advert_inquiries/{inquiryId} {
       allow get: if isSignedIn() && isValidId(inquiryId) &&
-        (existing().senderUid == request.auth.uid || existing().ownerUid == request.auth.uid || isBootstrappedAdmin());
+        (existing().senderUid == request.auth.uid || existing().ownerUid == request.auth.uid || isPlatformAdmin());
       allow list: if isSignedIn() &&
-        (resource.data.senderUid == request.auth.uid || resource.data.ownerUid == request.auth.uid || isBootstrappedAdmin());
+        (resource.data.senderUid == request.auth.uid || resource.data.ownerUid == request.auth.uid || isPlatformAdmin());
 
       allow create: if isSignedIn() &&
         isValidId(inquiryId) &&
@@ -663,14 +687,14 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(inquiryId) &&
         isValidAdvertInquiry(incoming()) &&
-        (existing().ownerUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().ownerUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().advertId == existing().advertId &&
         incoming().ownerUid == existing().ownerUid &&
         incoming().senderUid == existing().senderUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly(['status']);
 
-      allow delete: if isSignedIn() && isValidId(inquiryId) && (existing().senderUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(inquiryId) && (existing().senderUid == request.auth.uid || isPlatformAdmin());
     }
 
     match /tutors/{tutorId} {
@@ -699,7 +723,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(tutorId) &&
         isValidTutor(incoming()) &&
-        (existing().teacherUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().teacherUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().teacherUid == existing().teacherUid &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -709,14 +733,14 @@ service cloud.firestore {
           'locationLabel', 'latitude', 'longitude', 'rating', 'onlineActive', 'updatedAt'
         ]);
 
-      allow delete: if isSignedIn() && isValidId(tutorId) && (existing().teacherUid == request.auth.uid || isBootstrappedAdmin());
+      allow delete: if isSignedIn() && isValidId(tutorId) && (existing().teacherUid == request.auth.uid || isPlatformAdmin());
     }
 
     match /tutor_sessions/{sessionId} {
       allow get: if isSignedIn() && isValidId(sessionId) &&
-        (existing().clientUid == request.auth.uid || existing().teacherUid == request.auth.uid || isBootstrappedAdmin());
+        (existing().clientUid == request.auth.uid || existing().teacherUid == request.auth.uid || isPlatformAdmin());
       allow list: if isSignedIn() &&
-        (resource.data.clientUid == request.auth.uid || resource.data.teacherUid == request.auth.uid || isBootstrappedAdmin());
+        (resource.data.clientUid == request.auth.uid || resource.data.teacherUid == request.auth.uid || isPlatformAdmin());
 
       allow create: if isSignedIn() &&
         isValidId(sessionId) &&
@@ -745,7 +769,7 @@ service cloud.firestore {
         incoming().clientUid == existing().clientUid &&
         incoming().createdAt == existing().createdAt &&
         (
-          isBootstrappedAdmin() ||
+          isPlatformAdmin() ||
           (
             existing().teacherUid == request.auth.uid &&
             existing().status != 'CANCELLED' &&
@@ -767,9 +791,9 @@ service cloud.firestore {
 
     match /payments/{paymentId} {
       allow get: if isSignedIn() && isValidId(paymentId) &&
-        (existing().payerUid == request.auth.uid || existing().recipientUid == request.auth.uid || isBootstrappedAdmin());
+        (existing().payerUid == request.auth.uid || existing().recipientUid == request.auth.uid || isPlatformAdmin());
       allow list: if isSignedIn() &&
-        (resource.data.payerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid || isBootstrappedAdmin());
+        (resource.data.payerUid == request.auth.uid || resource.data.recipientUid == request.auth.uid || isPlatformAdmin());
 
       allow create: if isSignedIn() &&
         isValidId(paymentId) &&
@@ -792,7 +816,7 @@ service cloud.firestore {
       allow update: if isSignedIn() &&
         isValidId(paymentId) &&
         isValidPayment(incoming()) &&
-        (existing().recipientUid == request.auth.uid || isBootstrappedAdmin()) &&
+        (existing().recipientUid == request.auth.uid || isPlatformAdmin()) &&
         incoming().payerUid == existing().payerUid &&
         incoming().recipientUid == existing().recipientUid &&
         incoming().amount == existing().amount &&
@@ -803,6 +827,73 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'notes', 'updatedAt']);
 
       allow delete: if false;
+    }
+
+    match /platform_admins/{targetUid} {
+      allow get: if isSignedIn() && isValidId(targetUid) && (isOwner(targetUid) || isPlatformAdmin());
+      allow list: if isPlatformAdmin();
+
+      allow create: if isBootstrappedAdmin() &&
+        isValidId(targetUid) &&
+        incoming().userId == targetUid &&
+        incoming().grantedByUid == request.auth.uid &&
+        incoming().keys().hasAll(['userId', 'email', 'displayName', 'grantedByUid', 'grantedByEmail', 'createdAt']) &&
+        incoming().keys().hasOnly(['userId', 'email', 'displayName', 'grantedByUid', 'grantedByEmail', 'createdAt']) &&
+        isValidPlatformAdmin(incoming());
+
+      allow update: if isBootstrappedAdmin() &&
+        isValidId(targetUid) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        isValidPlatformAdmin(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'grantedByUid', 'grantedByEmail']);
+
+      allow delete: if isBootstrappedAdmin() && isValidId(targetUid);
+    }
+
+    match /app_analytics/{metricId} {
+      allow get: if isValidId(metricId) && isPlatformAdmin();
+      allow list: if isPlatformAdmin();
+
+      allow create: if isSignedIn() &&
+        metricId == 'visits_summary' &&
+        incoming().keys().hasAll(['totalVisits', 'androidVisits', 'webVisits', 'updatedAt']) &&
+        incoming().keys().hasOnly(['totalVisits', 'androidVisits', 'webVisits', 'updatedAt']) &&
+        incoming().totalVisits is int && incoming().totalVisits == 1 &&
+        incoming().androidVisits is int && incoming().androidVisits in [0, 1] &&
+        incoming().webVisits is int && incoming().webVisits in [0, 1] &&
+        (incoming().androidVisits + incoming().webVisits) == 1 &&
+        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+
+      allow update: if isSignedIn() &&
+        metricId == 'visits_summary' &&
+        incoming().keys().hasAll(['totalVisits', 'androidVisits', 'webVisits', 'updatedAt']) &&
+        incoming().keys().hasOnly(['totalVisits', 'androidVisits', 'webVisits', 'updatedAt']) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['totalVisits', 'androidVisits', 'webVisits', 'updatedAt']) &&
+        incoming().totalVisits is int && incoming().totalVisits == existing().totalVisits + 1 &&
+        incoming().androidVisits is int &&
+        incoming().webVisits is int &&
+        (
+          (incoming().androidVisits == existing().androidVisits + 1 && incoming().webVisits == existing().webVisits) ||
+          (incoming().webVisits == existing().webVisits + 1 && incoming().androidVisits == existing().androidVisits)
+        ) &&
+        incoming().updatedAt is timestamp && incoming().updatedAt <= request.time;
+
+      allow delete: if false;
+    }
+
+    match /visit_logs/{visitId} {
+      allow get: if isValidId(visitId) && isPlatformAdmin();
+      allow list: if isPlatformAdmin();
+
+      allow create: if isSignedIn() &&
+        isValidId(visitId) &&
+        isValidVisitLog(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().keys().hasAll(['userId', 'userEmail', 'displayName', 'role', 'platform', 'createdAt']) &&
+        incoming().keys().hasOnly(['userId', 'userEmail', 'displayName', 'role', 'platform', 'createdAt']);
+
+      allow update, delete: if false;
     }
   }
 }

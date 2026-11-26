@@ -29,9 +29,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.NightsStay
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.WbTwilight
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -49,10 +53,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
+import com.example.data.CloudSqlConnectionStatus
 import com.example.ui.theme.HighlightHue
 import com.example.ui.theme.SolarThemeCalculator
+import com.example.ui.theme.StatusPresentGreen
 import com.example.ui.theme.ThemeAppearanceMode
 import com.example.ui.theme.ThemeSettings
 
@@ -65,10 +73,13 @@ fun SettingsPrivacyScreen(
     locationLabel: String,
     displayName: String,
     userEmail: String,
+    cloudSqlStatus: CloudSqlConnectionStatus = CloudSqlConnectionStatus(),
+    isTestingCloudSql: Boolean = false,
     onSelectAppearanceMode: (ThemeAppearanceMode) -> Unit,
     onSelectHighlightHue: (HighlightHue) -> Unit,
     onToggleAutoOnlineDiscovery: (Boolean) -> Unit,
     onTogglePreciseLocation: (Boolean) -> Unit,
+    onVerifyAndSyncCloudSql: () -> Unit = {},
     onOpenProfile: () -> Unit,
     onSignOut: () -> Unit,
     onBack: () -> Unit
@@ -358,6 +369,88 @@ fun SettingsPrivacyScreen(
                                 onCheckedChange = onTogglePreciseLocation,
                                 modifier = Modifier.testTag("privacy_precise_location_switch")
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shared Cloud SQL (PostgreSQL) Cross-Platform Sync
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Shared Cloud SQL (Web & Android)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("cloud_sql_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Storage,
+                                contentDescription = null,
+                                tint = if (cloudSqlStatus.isConnected) {
+                                    StatusPresentGreen
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                }
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (cloudSqlStatus.isConnected) {
+                                        "Connected • ${cloudSqlStatus.engine}"
+                                    } else {
+                                        "Cloud SQL REST Bridge (${cloudSqlStatus.engine})"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = cloudSqlStatus.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Endpoint: ${BuildConfig.SKOLQUIK_API_BASE_URL}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Button(
+                            onClick = onVerifyAndSyncCloudSql,
+                            enabled = !isTestingCloudSql,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("sync_cloud_sql_button")
+                        ) {
+                            if (isTestingCloudSql) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(Icons.Filled.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(Modifier.size(8.dp))
+                            Text(if (isTestingCloudSql) "Checking Cloud SQL…" else "Test & Sync Cloud SQL")
                         }
                     }
                 }

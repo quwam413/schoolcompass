@@ -10,8 +10,12 @@ import com.example.data.AiAdvisorMessage
 import com.example.data.AiAdvisorModelOption
 import com.example.data.AiSchoolAdvisorService
 import com.example.data.Announcement
+import com.example.data.AppVisitLog
+import com.example.data.AppVisitStats
 import com.example.data.AttendanceLog
 import com.example.data.ChatMessage
+import com.example.data.CloudSqlAdminOverview
+import com.example.data.CloudSqlConnectionStatus
 import com.example.data.Conversation
 import com.example.data.Enrollment
 import com.example.data.ExternalSchoolService
@@ -21,6 +25,7 @@ import com.example.data.GroundingSourceLink
 import com.example.data.OnlineSchoolGroundingService
 import com.example.data.PaymentRepository
 import com.example.data.PaymentTransaction
+import com.example.data.PlatformAdminRecord
 import com.example.data.ProgressiveTutor
 import com.example.data.School
 import com.example.data.SchoolConstants
@@ -79,6 +84,7 @@ enum class MainTab {
     MESSAGES,
     PORTAL,
     ADMIN,
+    PLATFORM_ADMIN,
     ADVERTS,
     AI_ADVISOR,
     SETTINGS,
@@ -101,8 +107,24 @@ class SchoolViewModel(
         const val STOP_TIMEOUT_MILLIS = 5000L
     }
 
-    val isPlatformAdmin: Boolean =
+    val isBootstrappedOwner: Boolean =
         userEmail.trim().equals(SchoolConstants.PLATFORM_ADMIN_EMAIL, ignoreCase = true)
+
+    val isPlatformAdminState: StateFlow<Boolean> =
+        if (isBootstrappedOwner) {
+            MutableStateFlow(true).asStateFlow()
+        } else {
+            repository.observeIsDelegatedAdmin(currentUserId)
+                .catch { emit(false) }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                    initialValue = false
+                )
+        }
+
+    val isPlatformAdmin: Boolean
+        get() = isPlatformAdminState.value
 
     private fun <T> Flow<T>.toUiStateFlow(): StateFlow<UiState<T>> =
         this.map<T, UiState<T>> { UiState.Success(it) }
@@ -169,26 +191,54 @@ class SchoolViewModel(
     val receivedInquiriesState: StateFlow<UiState<List<AdvertInquiry>>> =
         paymentRepository.observeInquiriesByOwner(currentUserId).toUiStateFlow()
 
-    // Strictly gated so regular users never subscribe to global admin queries
+    // Strictly gated on owner or delegated platform admins so regular users never subscribe to global queries
     val adminAllUsersState: StateFlow<UiState<List<UserProfile>>> =
-        if (isPlatformAdmin) paymentRepository.observeAllUsersForAdmin().toUiStateFlow()
-        else MutableStateFlow<UiState<List<UserProfile>>>(UiState.Success(emptyList())).asStateFlow()
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) paymentRepository.observeAllUsersForAdmin()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
 
     val adminAllEnrollmentsState: StateFlow<UiState<List<Enrollment>>> =
-        if (isPlatformAdmin) paymentRepository.observeAllEnrollmentsForAdmin().toUiStateFlow()
-        else MutableStateFlow<UiState<List<Enrollment>>>(UiState.Success(emptyList())).asStateFlow()
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) paymentRepository.observeAllEnrollmentsForAdmin()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
 
     val adminAllTutorSessionsState: StateFlow<UiState<List<TutorSession>>> =
-        if (isPlatformAdmin) paymentRepository.observeAllTutorSessionsForAdmin().toUiStateFlow()
-        else MutableStateFlow<UiState<List<TutorSession>>>(UiState.Success(emptyList())).asStateFlow()
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) paymentRepository.observeAllTutorSessionsForAdmin()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
 
     val adminAllInquiriesState: StateFlow<UiState<List<AdvertInquiry>>> =
-        if (isPlatformAdmin) paymentRepository.observeAllInquiriesForAdmin().toUiStateFlow()
-        else MutableStateFlow<UiState<List<AdvertInquiry>>>(UiState.Success(emptyList())).asStateFlow()
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) paymentRepository.observeAllInquiriesForAdmin()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
 
     val adminAllPaymentsState: StateFlow<UiState<List<PaymentTransaction>>> =
-        if (isPlatformAdmin) paymentRepository.observeAllPaymentsForAdmin().toUiStateFlow()
-        else MutableStateFlow<UiState<List<PaymentTransaction>>>(UiState.Success(emptyList())).asStateFlow()
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) paymentRepository.observeAllPaymentsForAdmin()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
+
+    val platformAdminsState: StateFlow<UiState<List<PlatformAdminRecord>>> =
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) repository.observePlatformAdmins()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
+
+    val appVisitStatsState: StateFlow<UiState<AppVisitStats?>> =
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) repository.observeAppVisitStats()
+            else flowOf(null)
+        }.toUiStateFlow()
+
+    val visitLogsState: StateFlow<UiState<List<AppVisitLog>>> =
+        isPlatformAdminState.flatMapLatest { isAdmin ->
+            if (isAdmin) repository.observeRecentVisitLogs()
+            else flowOf(emptyList())
+        }.toUiStateFlow()
 
     private val _searchFilter = MutableStateFlow(SchoolSearchFilter())
     val searchFilter: StateFlow<SchoolSearchFilter> = _searchFilter.asStateFlow()
@@ -245,6 +295,17 @@ class SchoolViewModel(
     private val _onlineTutorsError = MutableStateFlow<String?>(null)
     val onlineTutorsError: StateFlow<String?> = _onlineTutorsError.asStateFlow()
 
+    private val _cloudSqlSchools = MutableStateFlow<List<School>>(emptyList())
+
+    private val _cloudSqlStatus = MutableStateFlow(CloudSqlConnectionStatus())
+    val cloudSqlStatus: StateFlow<CloudSqlConnectionStatus> = _cloudSqlStatus.asStateFlow()
+
+    private val _sqlAdminOverview = MutableStateFlow<CloudSqlAdminOverview?>(null)
+    val sqlAdminOverview: StateFlow<CloudSqlAdminOverview?> = _sqlAdminOverview.asStateFlow()
+
+    private val _isTestingCloudSql = MutableStateFlow(false)
+    val isTestingCloudSql: StateFlow<Boolean> = _isTestingCloudSql.asStateFlow()
+
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
@@ -268,6 +329,7 @@ class SchoolViewModel(
 
     private var initialAnnouncementsSeen = false
     private val seenAnnouncementIds = mutableSetOf<String>()
+    private var visitRecordedThisSession = false
 
     private data class GeoFetchKey(val latBucket: Long, val lngBucket: Long, val radiusKm: Int, val lat: Double, val lng: Double)
 
@@ -320,6 +382,17 @@ class SchoolViewModel(
             userProfileState.collect { state ->
                 if (state is UiState.Success) {
                     val profile = state.data
+                    if (!visitRecordedThisSession) {
+                        visitRecordedThisSession = true
+                        viewModelScope.launch {
+                            repository.recordAppVisit(
+                                userEmail = userEmail,
+                                displayName = profile?.displayName?.ifBlank { null } ?: userDisplayName.ifBlank { "Member" },
+                                role = profile?.role ?: "parent",
+                                platform = "android"
+                            )
+                        }
+                    }
                     if (profile != null) {
                         _searchFilter.update { current ->
                             if (current.centerLabel == "Lekki Phase 1, Lagos" &&
@@ -343,6 +416,15 @@ class SchoolViewModel(
                             } else current
                         }
                     }
+                }
+            }
+        }
+        viewModelScope.launch {
+            isPlatformAdminState.collect { isAdmin ->
+                if (isAdmin) {
+                    refreshPlatformAnalyticsSql()
+                } else if (_selectedTab.value == MainTab.PLATFORM_ADMIN) {
+                    _selectedTab.value = MainTab.DISCOVER
                 }
             }
         }
@@ -593,6 +675,10 @@ class SchoolViewModel(
             ?: userDisplayName.ifBlank { "Parent" }
 
     fun selectTab(tab: MainTab) {
+        if (tab == MainTab.PLATFORM_ADMIN && !isPlatformAdminState.value) {
+            _uiMessages.tryEmit("Restricted: Admin access required")
+            return
+        }
         _selectedTab.value = tab
     }
 
@@ -705,7 +791,7 @@ class SchoolViewModel(
         _onlineGroundingLoading.value = true
         _onlineGroundingError.value = null
         val filter = _searchFilter.value
-        val (osmRes, googleRes, groundedRes) = coroutineScope {
+        val (osmRes, googleRes, groundedRes, sqlRes) = coroutineScope {
             val osmDeferred = async { ExternalSchoolService.fetchNearbyExternalSchools(lat, lng, radiusKm) }
             val googleDeferred = async { GoogleMapsPlatformService.fetchNearbyGooglePlacesSchools(lat, lng, radiusKm) }
             val groundedDeferred = async {
@@ -717,7 +803,25 @@ class SchoolViewModel(
                     radiusKm = radiusKm
                 )
             }
-            Triple(osmDeferred.await(), googleDeferred.await(), groundedDeferred.await())
+            val sqlDeferred = async { repository.fetchSchoolsFromCloudSql(lat, lng, radiusKm) }
+            listOf(osmDeferred, googleDeferred, groundedDeferred, sqlDeferred)
+                .let {
+                    @Suppress("UNCHECKED_CAST")
+                    arrayOf(
+                        osmDeferred.await(),
+                        googleDeferred.await(),
+                        groundedDeferred.await(),
+                        sqlDeferred.await()
+                    )
+                }
+        }.let { arr ->
+            @Suppress("UNCHECKED_CAST")
+            Tuple4(
+                arr[0] as Result<List<School>>,
+                arr[1] as Result<List<School>>,
+                arr[2] as Result<List<School>>,
+                arr[3] as Result<List<School>>
+            )
         }
         _externalDirectoryLoading.value = false
         _onlineGroundingLoading.value = false
@@ -725,15 +829,29 @@ class SchoolViewModel(
         val googleSchools = googleRes.getOrNull().orEmpty()
         val groundedSchools = groundedRes.getOrNull().orEmpty()
         val osmSchools = osmRes.getOrNull().orEmpty()
+        val sqlSchools = sqlRes.getOrNull().orEmpty()
+        if (sqlRes.isSuccess) {
+            _cloudSqlSchools.value = sqlSchools
+            _cloudSqlStatus.value = CloudSqlConnectionStatus(
+                isConnected = true,
+                engine = "PostgreSQL",
+                message = "Synced ${sqlSchools.size} schools with shared Web Cloud SQL",
+                syncedSchoolsCount = sqlSchools.size,
+                lastSyncedAtMillis = System.currentTimeMillis()
+            )
+        }
 
         val mergedExternal = ExternalSchoolService.mergeRegisteredAndExternalSchools(
             registered = ExternalSchoolService.mergeRegisteredAndExternalSchools(
-                registered = googleSchools,
-                external = groundedSchools
+                registered = sqlSchools,
+                external = ExternalSchoolService.mergeRegisteredAndExternalSchools(
+                    registered = googleSchools,
+                    external = groundedSchools
+                )
             ),
             external = osmSchools
         )
-        if (mergedExternal.isNotEmpty() || osmRes.isSuccess || googleRes.isSuccess || groundedRes.isSuccess) {
+        if (mergedExternal.isNotEmpty() || osmRes.isSuccess || googleRes.isSuccess || groundedRes.isSuccess || sqlRes.isSuccess) {
             _externalSchools.value = mergedExternal
             val toPersist = (groundedSchools + googleSchools).distinctBy { it.id }
             if (toPersist.isNotEmpty()) {
@@ -1600,5 +1718,99 @@ class SchoolViewModel(
             }
         }
     }
+
+    fun verifyAndSyncCloudSql() {
+        if (_isTestingCloudSql.value) return
+        viewModelScope.launch {
+            _isTestingCloudSql.value = true
+            val health = repository.checkCloudSqlHealth()
+            if (!health.isConnected) {
+                _cloudSqlStatus.value = health
+                _isTestingCloudSql.value = false
+                _uiMessages.tryEmit(health.message)
+                return@launch
+            }
+            val registered = (schoolsState.value as? UiState.Success)?.data.orEmpty()
+            val combinedToPush = ExternalSchoolService.mergeRegisteredAndExternalSchools(
+                registered = registered,
+                external = _externalSchools.value
+            )
+            repository.syncSchoolsBatchToCloudSql(combinedToPush)
+            val filter = _searchFilter.value
+            val pulled = repository.fetchSchoolsFromCloudSql(
+                lat = filter.centerLat,
+                lng = filter.centerLng,
+                radiusKm = filter.radiusKm
+            ).getOrDefault(emptyList())
+            if (pulled.isNotEmpty()) {
+                _cloudSqlSchools.value = pulled
+                _externalSchools.update { existing ->
+                    ExternalSchoolService.mergeRegisteredAndExternalSchools(pulled, existing)
+                }
+            }
+            val syncedCount = maxOf(pulled.size, health.syncedSchoolsCount, combinedToPush.size)
+            _cloudSqlStatus.value = CloudSqlConnectionStatus(
+                isConnected = true,
+                engine = health.engine,
+                message = "Connected to ${health.engine} • $syncedCount schools in sync",
+                syncedSchoolsCount = syncedCount,
+                lastSyncedAtMillis = System.currentTimeMillis()
+            )
+            _isTestingCloudSql.value = false
+            _uiMessages.tryEmit("Shared Cloud SQL (${health.engine}) synced cleanly")
+        }
+    }
+
+    fun grantPlatformAdminAccess(targetUser: UserProfile) {
+        if (!isBootstrappedOwner) {
+            _uiMessages.tryEmit("Only the primary owner can grant admin access")
+            return
+        }
+        viewModelScope.launch {
+            _isBusy.value = true
+            val res = repository.grantPlatformAdmin(
+                targetUser = targetUser,
+                grantedByEmail = userEmail
+            )
+            _isBusy.value = false
+            res.onSuccess {
+                _uiMessages.tryEmit("Admin access granted to ${targetUser.displayName.ifBlank { targetUser.email }}")
+            }.onFailure {
+                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to grant admin access")
+            }
+        }
+    }
+
+    fun revokePlatformAdminAccess(targetUserId: String, targetEmail: String, targetName: String) {
+        if (!isBootstrappedOwner) {
+            _uiMessages.tryEmit("Only the primary owner can revoke admin access")
+            return
+        }
+        viewModelScope.launch {
+            _isBusy.value = true
+            val res = repository.revokePlatformAdmin(
+                targetUserId = targetUserId,
+                targetEmail = targetEmail,
+                targetName = targetName
+            )
+            _isBusy.value = false
+            res.onSuccess {
+                _uiMessages.tryEmit("Admin access revoked for ${targetName.ifBlank { targetEmail }}")
+            }.onFailure {
+                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to revoke admin access")
+            }
+        }
+    }
+
+    fun refreshPlatformAnalyticsSql() {
+        if (!isPlatformAdminState.value) return
+        viewModelScope.launch {
+            repository.fetchCloudSqlAdminOverview().onSuccess { overview ->
+                _sqlAdminOverview.value = overview
+            }
+        }
+    }
+
+    private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 }
 

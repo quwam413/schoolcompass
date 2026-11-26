@@ -20,6 +20,11 @@ android {
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField(
+      "String",
+      "SKOLQUIK_API_BASE_URL",
+      "\"https://ais-pre-2twucpr4pjla5edur3vinr-571905150412.europe-west1.run.app\""
+    )
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

@@ -710,3 +710,36 @@ data class AiAdvisorMessage(
     val groundingLinks: List<GroundingSourceLink> = emptyList()
 )
 
+@Keep
+@IgnoreExtraProperties
+data class PlatformAdminRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val email: String = "",
+    val displayName: String = "",
+    val grantedByUid: String = "",
+    val grantedByEmail: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class AppVisitStats(
+    @DocumentId val id: String = "",
+    val totalVisits: Long = 0L,
+    val androidVisits: Long = 0L,
+    val webVisits: Long = 0L,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class AppVisitLog(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val userEmail: String = "",
+    val displayName: String = "",
+    val role: String = "parent",
+    val platform: String = "android",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)

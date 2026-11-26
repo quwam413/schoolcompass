@@ -1078,4 +1078,221 @@ class ExampleRobolectricTest {
         assertEquals(listOf("See you at reception!"), sentMessages)
         composeTestRule.onNodeWithText("See you at reception!").assertIsDisplayed()
     }
+
+    @Test
+    fun `cloudSqlSyncClient validates urls parses health and round trips school json and renders sync card`() {
+        assertEquals(
+            "https://ais-pre-2twucpr4pjla5edur3vinr-571905150412.europe-west1.run.app",
+            com.example.data.CloudSqlSyncClient.normalizeSafeBaseUrl(
+                "https://ais-pre-2twucpr4pjla5edur3vinr-571905150412.europe-west1.run.app/"
+            )
+        )
+        assertEquals(null, com.example.data.CloudSqlSyncClient.normalizeSafeBaseUrl("http://insecure.example.com"))
+        assertEquals(null, com.example.data.CloudSqlSyncClient.normalizeSafeBaseUrl("javascript:alert(1)"))
+
+        val okHealth = com.example.data.CloudSqlSyncClient.parseHealthResponse(
+            """{"ok":true,"engine":"PostgreSQL","schoolsCount":42}""",
+            200
+        )
+        assertTrue(okHealth.isConnected)
+        assertEquals("PostgreSQL", okHealth.engine)
+        assertEquals(42, okHealth.syncedSchoolsCount)
+
+        val missingRoute = com.example.data.CloudSqlSyncClient.parseHealthResponse("Not Found", 404)
+        assertFalse(missingRoute.isConnected)
+        assertTrue(missingRoute.message.contains("404"))
+
+        val htmlFallback = com.example.data.CloudSqlSyncClient.parseHealthResponse("<!doctype html><html></html>", 200)
+        assertFalse(htmlFallback.isConnected)
+
+        val school = School(
+            id = "sql_school_1",
+            name = "Corona Secondary School",
+            address = "Agbara, Ogun State",
+            latitude = 6.502,
+            longitude = 3.108,
+            curriculum = "Nigerian & British",
+            verificationStatus = "VERIFIED_ONLINE",
+            websiteUrl = "https://coronaschools.org"
+        )
+        val payload = com.example.data.CloudSqlSyncClient.schoolToJson(school)
+        val parsed = com.example.data.CloudSqlSyncClient.parseSqlSchoolsJson("""{"schools":[$payload]}""")
+        assertEquals(1, parsed.size)
+        assertEquals("sql_school_1", parsed.first().id)
+        assertEquals("Corona Secondary School", parsed.first().name)
+        assertEquals("https://coronaschools.org", parsed.first().websiteUrl)
+
+        var syncClicked = false
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SettingsPrivacyScreen(
+                    themeSettings = ThemeSettings(),
+                    latitude = 6.4474,
+                    longitude = 3.4737,
+                    locationLabel = "Lekki Phase 1, Lagos",
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    cloudSqlStatus = okHealth,
+                    isTestingCloudSql = false,
+                    onSelectAppearanceMode = {},
+                    onSelectHighlightHue = {},
+                    onToggleAutoOnlineDiscovery = {},
+                    onTogglePreciseLocation = {},
+                    onVerifyAndSyncCloudSql = { syncClicked = true },
+                    onOpenProfile = {},
+                    onSignOut = {},
+                    onBack = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_privacy_screen")
+            .performScrollToNode(hasTestTag("sync_cloud_sql_button"))
+        composeTestRule.onNodeWithTag("cloud_sql_card").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("sync_cloud_sql_button").performClick()
+        assertTrue(syncClicked)
+    }
+
+    @Test
+    fun `platformAdminScreen restricts non-admins and shows individuals schools visits and admin delegation controls`() {
+        val overview = com.example.data.parseAdminOverviewJson(
+            """{"totalVisits":148,"androidVisits":92,"webVisits":56,"totalUsersCount":3,"individualsCount":2,"schoolAccountsCount":1,"schoolsCount":1}"""
+        )
+        assertEquals(148L, overview.totalVisits)
+        assertEquals(92L, overview.androidVisits)
+        assertEquals(56L, overview.webVisits)
+
+        val grantedUids = mutableListOf<String>()
+        val revokedUids = mutableListOf<String>()
+        val parentUser = com.example.data.UserProfile(
+            id = "u_ind_1",
+            userId = "u_ind_1",
+            role = "parent",
+            displayName = "Amina Individual",
+            email = "amina@example.com",
+            homeAddress = "Lekki, Lagos"
+        )
+        val schoolAdminUser = com.example.data.UserProfile(
+            id = "u_sch_1",
+            userId = "u_sch_1",
+            role = "admin",
+            displayName = "Greenhills Admissions",
+            email = "admissions@greenhills.edu.ng",
+            homeAddress = "Victoria Island, Lagos"
+        )
+        val delegated = com.example.data.PlatformAdminRecord(
+            id = "u_sch_1",
+            userId = "u_sch_1",
+            email = "admissions@greenhills.edu.ng",
+            displayName = "Greenhills Admissions",
+            grantedByUid = "owner_1",
+            grantedByEmail = SchoolConstants.PLATFORM_ADMIN_EMAIL
+        )
+
+        val isAdminState = androidx.compose.runtime.mutableStateOf(false)
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.PlatformAdminScreen(
+                    isPlatformAdmin = isAdminState.value,
+                    isBootstrappedOwner = true,
+                    currentUserEmail = SchoolConstants.PLATFORM_ADMIN_EMAIL,
+                    allUsersState = UiState.Success(listOf(parentUser, schoolAdminUser)),
+                    schoolsState = UiState.Success(
+                        listOf(
+                            School(
+                                id = "sch_1",
+                                adminUid = "u_sch_1",
+                                adminName = "Greenhills Admissions",
+                                name = "Greenhills Academy",
+                                address = "Victoria Island, Lagos"
+                            )
+                        )
+                    ),
+                    platformAdminsState = UiState.Success(listOf(delegated)),
+                    visitStatsState = UiState.Success(
+                        com.example.data.AppVisitStats(
+                            id = "visits_summary",
+                            totalVisits = 148L,
+                            androidVisits = 92L,
+                            webVisits = 56L
+                        )
+                    ),
+                    visitLogsState = UiState.Success(
+                        listOf(
+                            com.example.data.AppVisitLog(
+                                id = "vis_1",
+                                userId = "u_ind_1",
+                                userEmail = "amina@example.com",
+                                displayName = "Amina Individual",
+                                role = "parent",
+                                platform = "web"
+                            )
+                        )
+                    ),
+                    sqlAdminOverview = overview,
+                    onGrantAdmin = { grantedUids.add(it.userId) },
+                    onRevokeAdmin = { uid, _, _ -> revokedUids.add(uid) },
+                    onVerifySchool = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_admin_restricted").assertIsDisplayed()
+
+        isAdminState.value = true
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_admin_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("admin_total_visits_value").assertIsDisplayed()
+        composeTestRule.onNodeWithText("148").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("user_make_admin_u_ind_1"))
+        composeTestRule.onNodeWithTag("user_make_admin_u_ind_1").performClick()
+        assertEquals(listOf("u_ind_1"), grantedUids)
+
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("admin_segment_1"))
+        composeTestRule.onNodeWithTag("admin_segment_1").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("user_revoke_admin_u_sch_1"))
+        composeTestRule.onNodeWithTag("user_revoke_admin_u_sch_1").performClick()
+        assertEquals(listOf("u_sch_1"), revokedUids)
+    }
+
+    @Test
+    fun `sidebar hides Platform Admin for non-admins and shows it for authorized admins`() {
+        val isAdminState = androidx.compose.runtime.mutableStateOf(false)
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = com.example.ui.MainTab.DISCOVER,
+                    displayName = "User",
+                    userEmail = "user@example.com",
+                    userRole = "parent",
+                    isPlatformAdmin = isAdminState.value,
+                    favoriteCount = 0,
+                    snackbarHostState = snackbarHostState,
+                    onSelectTab = {},
+                    onOpenProfile = {},
+                    onSignOut = {}
+                ) {
+                    androidx.compose.material3.Text("Body")
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_sidebar_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("nav_platform_admin")).fetchSemanticsNodes().isEmpty())
+
+        isAdminState.value = true
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("nav_platform_admin").performScrollTo().assertIsDisplayed()
+    }
 }
+

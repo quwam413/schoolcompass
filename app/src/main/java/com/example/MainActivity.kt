@@ -42,6 +42,7 @@ import com.example.ui.MessagesScreen
 import com.example.ui.PaidAdvertsScreen
 import com.example.ui.ParentPortalScreen
 import com.example.ui.PaymentReceiptDialog
+import com.example.ui.PlatformAdminScreen
 import com.example.ui.ProgressiveTutorsScreen
 import com.example.ui.RegistrationPortalScreen
 import com.example.ui.SavedSchoolsScreen
@@ -232,6 +233,13 @@ private fun AuthenticatedShell(
     val isHomeRefreshing by viewModel.isHomeRefreshing.collectAsStateWithLifecycle()
     val onlineTutorsLoading by viewModel.onlineTutorsLoading.collectAsStateWithLifecycle()
     val onlineTutorsError by viewModel.onlineTutorsError.collectAsStateWithLifecycle()
+    val isPlatformAdmin by viewModel.isPlatformAdminState.collectAsStateWithLifecycle()
+    val platformAdminsState by viewModel.platformAdminsState.collectAsStateWithLifecycle()
+    val appVisitStatsState by viewModel.appVisitStatsState.collectAsStateWithLifecycle()
+    val visitLogsState by viewModel.visitLogsState.collectAsStateWithLifecycle()
+    val sqlAdminOverview by viewModel.sqlAdminOverview.collectAsStateWithLifecycle()
+    val cloudSqlStatus by viewModel.cloudSqlStatus.collectAsStateWithLifecycle()
+    val isTestingCloudSql by viewModel.isTestingCloudSql.collectAsStateWithLifecycle()
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
 
     LaunchedEffect(searchFilter.centerLat, searchFilter.centerLng) {
@@ -304,7 +312,7 @@ private fun AuthenticatedShell(
         displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
         userEmail = userEmail,
         userRole = currentProfile?.role ?: "parent",
-        isPlatformAdmin = viewModel.isPlatformAdmin,
+        isPlatformAdmin = isPlatformAdmin,
         favoriteCount = favoriteSchoolIds.size,
         snackbarHostState = snackbarHostState,
         onSelectTab = viewModel::selectTab,
@@ -377,6 +385,7 @@ private fun AuthenticatedShell(
                             savedSchoolsCount = favoriteSchoolIds.size,
                             enrollmentsState = parentEnrollmentsState,
                             conversationCount = (conversationsState as? UiState.Success)?.data?.size ?: 0,
+                            isPlatformAdmin = isPlatformAdmin,
                             onNavigateTab = viewModel::selectTab,
                             onRefreshOnline = {
                                 viewModel.refreshHomeFromPullDown()
@@ -469,7 +478,7 @@ private fun AuthenticatedShell(
                             adminName = currentProfile?.displayName ?: userDisplayName.ifBlank { "School Admin" },
                             defaultLat = currentProfile?.homeLat ?: searchFilter.centerLat,
                             defaultLng = currentProfile?.homeLng ?: searchFilter.centerLng,
-                            isPlatformAdmin = viewModel.isPlatformAdmin,
+                            isPlatformAdmin = isPlatformAdmin,
                             initialOpenOversight = initialPreferAdminPortal,
                             schoolsState = schoolsState,
                             unclaimedExternalSchools = unclaimedExternalSchools,
@@ -504,6 +513,27 @@ private fun AuthenticatedShell(
                             onConfirmPaymentPaid = { payment ->
                                 viewModel.confirmPaymentPaid(payment)
                             }
+                        )
+                        MainTab.PLATFORM_ADMIN -> PlatformAdminScreen(
+                            isPlatformAdmin = isPlatformAdmin,
+                            isBootstrappedOwner = viewModel.isBootstrappedOwner,
+                            currentUserEmail = userEmail,
+                            allUsersState = adminAllUsersState,
+                            schoolsState = schoolsState,
+                            platformAdminsState = platformAdminsState,
+                            visitStatsState = appVisitStatsState,
+                            visitLogsState = visitLogsState,
+                            sqlAdminOverview = sqlAdminOverview,
+                            cloudSqlStatus = cloudSqlStatus,
+                            isBusy = isBusy,
+                            onGrantAdmin = viewModel::grantPlatformAdminAccess,
+                            onRevokeAdmin = viewModel::revokePlatformAdminAccess,
+                            onVerifySchool = viewModel::verifyRegisteredSchoolOnInternet,
+                            onRefreshSqlOverview = {
+                                viewModel.refreshPlatformAnalyticsSql()
+                                viewModel.verifyAndSyncCloudSql()
+                            },
+                            onBack = { viewModel.selectTab(MainTab.DISCOVER) }
                         )
                         MainTab.ADVERTS -> PaidAdvertsScreen(
                             currentUserId = currentUserId,
@@ -546,6 +576,8 @@ private fun AuthenticatedShell(
                             locationLabel = searchFilter.centerLabel,
                             displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
                             userEmail = userEmail,
+                            cloudSqlStatus = cloudSqlStatus,
+                            isTestingCloudSql = isTestingCloudSql,
                             onSelectAppearanceMode = { mode ->
                                 scope.launch { themeStore.setAppearanceMode(mode) }
                             },
@@ -558,6 +590,7 @@ private fun AuthenticatedShell(
                             onTogglePreciseLocation = { enabled ->
                                 scope.launch { themeStore.setPreciseLocation(enabled) }
                             },
+                            onVerifyAndSyncCloudSql = viewModel::verifyAndSyncCloudSql,
                             onOpenProfile = { showProfileEditor = true },
                             onSignOut = {
                                 AuthManager.signOut(

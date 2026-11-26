@@ -859,4 +859,140 @@ test("Verified online schools save without registration gate, allow lightweight 
   );
 });
 
+test("Platform admin delegation grants access strictly to owner and promoted admins while tracking app visits securely", async () => {
+  const owner = testEnv.authenticatedContext("owner_uid", {
+    email: "elebutequam413@gmail.com",
+    email_verified: true,
+  }).firestore();
+  const carol = testEnv.authenticatedContext(OTHER_PARENT_UID, {
+    email: "carol@example.com",
+    email_verified: true,
+  }).firestore();
+  const alice = testEnv.authenticatedContext(PARENT_UID, {
+    email: "alice@example.com",
+    email_verified: true,
+  }).firestore();
+  const ts = pastDate(3000);
 
+  // Regular users sign up (one parent, one school account)
+  await assertSucceeds(
+    alice.collection("users").doc(PARENT_UID).set({
+      userId: PARENT_UID,
+      role: "parent",
+      displayName: "Alice Parent",
+      email: "alice@example.com",
+      homeLat: 6.4281,
+      homeLng: 3.4219,
+      searchRadiusKm: 10,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    carol.collection("users").doc(OTHER_PARENT_UID).set({
+      userId: OTHER_PARENT_UID,
+      role: "admin",
+      displayName: "Carol Academy",
+      email: "carol@example.com",
+      homeLat: 6.4474,
+      homeLng: 3.4737,
+      searchRadiusKm: 15,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Regular users can record one visit (+1) and a visit log for themselves, but cannot view totals or logs
+  await assertSucceeds(
+    alice.collection("app_analytics").doc("visits_summary").set({
+      totalVisits: 1,
+      androidVisits: 1,
+      webVisits: 0,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    carol.collection("app_analytics").doc("visits_summary").update({
+      totalVisits: 2,
+      androidVisits: 1,
+      webVisits: 1,
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertFails(
+    alice.collection("app_analytics").doc("visits_summary").update({
+      totalVisits: 99,
+      androidVisits: 99,
+      webVisits: 1,
+      updatedAt: pastDate(1000),
+    })
+  );
+  await assertSucceeds(
+    alice.collection("visit_logs").doc("vis_alice_1").set({
+      userId: PARENT_UID,
+      userEmail: "alice@example.com",
+      displayName: "Alice Parent",
+      role: "parent",
+      platform: "android",
+      createdAt: ts,
+    })
+  );
+  await assertFails(alice.collection("app_analytics").doc("visits_summary").get());
+  await assertFails(alice.collection("visit_logs").get());
+
+  // Regular user cannot self-promote or read other platform admins
+  await assertFails(
+    alice.collection("platform_admins").doc(PARENT_UID).set({
+      userId: PARENT_UID,
+      email: "alice@example.com",
+      displayName: "Alice Parent",
+      grantedByUid: PARENT_UID,
+      grantedByEmail: "alice@example.com",
+      createdAt: ts,
+    })
+  );
+  await assertFails(carol.collection("platform_admins").get());
+  await assertFails(carol.collection("users").get());
+
+  // User can check their own platform_admins doc (returns non-existent before promotion)
+  await assertSucceeds(carol.collection("platform_admins").doc(OTHER_PARENT_UID).get());
+
+  // Primary owner promotes Carol to delegated platform admin
+  await assertSucceeds(
+    owner.collection("platform_admins").doc(OTHER_PARENT_UID).set({
+      userId: OTHER_PARENT_UID,
+      email: "carol@example.com",
+      displayName: "Carol Academy",
+      grantedByUid: "owner_uid",
+      grantedByEmail: "elebutequam413@gmail.com",
+      createdAt: ts,
+    })
+  );
+
+  // Delegated admin Carol can now access all signed-up users, visits summary, and visit logs
+  await assertSucceeds(carol.collection("users").get());
+  await assertSucceeds(carol.collection("app_analytics").doc("visits_summary").get());
+  await assertSucceeds(carol.collection("visit_logs").get());
+  await assertSucceeds(carol.collection("platform_admins").get());
+
+  // Delegated admin still cannot promote/demote other admins (owner-only privilege)
+  await assertFails(
+    carol.collection("platform_admins").doc(PARENT_UID).set({
+      userId: PARENT_UID,
+      email: "alice@example.com",
+      displayName: "Alice Parent",
+      grantedByUid: OTHER_PARENT_UID,
+      grantedByEmail: "carol@example.com",
+      createdAt: ts,
+    })
+  );
+
+  // Alice remains blocked
+  await assertFails(alice.collection("users").get());
+  await assertFails(alice.collection("app_analytics").doc("visits_summary").get());
+
+  // Owner revokes Carol's admin access -> Carol immediately loses admin privileges
+  await assertSucceeds(owner.collection("platform_admins").doc(OTHER_PARENT_UID).delete());
+  await assertFails(carol.collection("users").get());
+  await assertFails(carol.collection("app_analytics").doc("visits_summary").get());
+});
