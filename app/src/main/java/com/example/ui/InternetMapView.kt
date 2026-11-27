@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,12 +36,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 import com.example.data.SchoolSearchFilter
 import com.example.data.SchoolWithDistance
 import org.json.JSONArray
@@ -434,6 +437,13 @@ fun InternetStreetMapView(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var pageLoaded by remember { mutableStateOf(false) }
     var webViewUnavailable by remember { mutableStateOf(false) }
+    var webViewHostReady by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        delay(120L)
+        webViewHostReady = true
+    }
 
     val payloadJson = remember(filter, filteredSchools, primaryHex) {
         buildLeafletMapPayloadJson(
@@ -479,7 +489,14 @@ fun InternetStreetMapView(
             .background(surfaceColor)
             .testTag("internet_map_view")
     ) {
-        if (!webViewUnavailable) {
+        if (!webViewUnavailable && !webViewHostReady) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(26.dp), strokeWidth = 2.5.dp)
+            }
+        } else if (!webViewUnavailable) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->

@@ -51,11 +51,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.data.SchoolConstants
 import com.example.data.UserProfile
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -73,7 +75,8 @@ fun RegistrationPortalScreen(
         homeLat: Double,
         homeLng: Double,
         searchRadiusKm: Int,
-        childSummary: String?
+        childSummary: String?,
+        bannerImageUrl: String?
     ) -> Unit,
     onCancel: (() -> Unit)? = null
 ) {
@@ -106,9 +109,14 @@ fun RegistrationPortalScreen(
     var childSummary by remember(existingProfile) {
         mutableStateOf(existingProfile?.childSummary ?: "")
     }
+    var bannerImageUrl by remember(existingProfile) {
+        mutableStateOf(existingProfile?.bannerImageUrl)
+    }
     var locationMessage by remember { mutableStateOf<String?>(null) }
     var isLocatingGps by remember { mutableStateOf(false) }
     var hasPromptedLocation by remember { mutableStateOf(false) }
+
+    val gpsScope = androidx.compose.runtime.rememberCoroutineScope()
 
     @SuppressLint("MissingPermission")
     fun fetchGps(applyAddressLabel: Boolean = true) {
@@ -120,30 +128,35 @@ fun RegistrationPortalScreen(
             locationMessage = "GPS service unavailable; pick a neighborhood below"
             return
         }
+        fun applyCapturedCoordinates(lat: Double, lng: Double) {
+            homeLat = lat
+            homeLng = lng
+            gpsScope.launch {
+                val placeWords = com.example.data.GoogleMapsPlatformService.resolveHumanReadableLocation(
+                    context = context,
+                    latitude = lat,
+                    longitude = lng
+                )
+                isLocatingGps = false
+                if (applyAddressLabel) {
+                    homeAddress = placeWords
+                }
+                locationMessage = "Located: $placeWords"
+            }
+        }
         try {
             client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
                 .addOnSuccessListener { currentLoc ->
                     if (currentLoc != null) {
-                        isLocatingGps = false
-                        homeLat = currentLoc.latitude
-                        homeLng = currentLoc.longitude
-                        if (applyAddressLabel) {
-                            homeAddress = "Current GPS (${String.format("%.3f", currentLoc.latitude)}, ${String.format("%.3f", currentLoc.longitude)})"
-                        }
-                        locationMessage = "Device GPS captured (${String.format("%.4f", currentLoc.latitude)}, ${String.format("%.4f", currentLoc.longitude)})"
+                        applyCapturedCoordinates(currentLoc.latitude, currentLoc.longitude)
                     } else {
                         try {
                             client.lastLocation
                                 .addOnSuccessListener { lastLoc ->
-                                    isLocatingGps = false
                                     if (lastLoc != null) {
-                                        homeLat = lastLoc.latitude
-                                        homeLng = lastLoc.longitude
-                                        if (applyAddressLabel) {
-                                            homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
-                                        }
-                                        locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
+                                        applyCapturedCoordinates(lastLoc.latitude, lastLoc.longitude)
                                     } else {
+                                        isLocatingGps = false
                                         locationMessage = "GPS coordinates unavailable; pick a neighborhood below"
                                     }
                                 }
@@ -161,15 +174,10 @@ fun RegistrationPortalScreen(
                     try {
                         client.lastLocation
                             .addOnSuccessListener { lastLoc ->
-                                isLocatingGps = false
                                 if (lastLoc != null) {
-                                    homeLat = lastLoc.latitude
-                                    homeLng = lastLoc.longitude
-                                    if (applyAddressLabel) {
-                                        homeAddress = "Current GPS (${String.format("%.3f", lastLoc.latitude)}, ${String.format("%.3f", lastLoc.longitude)})"
-                                    }
-                                    locationMessage = "Device GPS captured (${String.format("%.4f", lastLoc.latitude)}, ${String.format("%.4f", lastLoc.longitude)})"
+                                    applyCapturedCoordinates(lastLoc.latitude, lastLoc.longitude)
                                 } else {
+                                    isLocatingGps = false
                                     locationMessage = "Unable to read GPS; pick a neighborhood below"
                                 }
                             }
@@ -267,6 +275,15 @@ fun RegistrationPortalScreen(
                     onClick = { selectedRole = "admin" }
                 )
             }
+
+            BannerImageEditorSection(
+                bannerImageUrl = bannerImageUrl,
+                fallbackResId = R.drawable.img_campus_hero,
+                title = "Display Banner Picture",
+                subtitle = "Shown on your page and any school or advert profile you manage",
+                testTagPrefix = "profile_banner",
+                onBannerChanged = { bannerImageUrl = it }
+            )
 
             OutlinedTextField(
                 value = displayName,
@@ -416,7 +433,8 @@ fun RegistrationPortalScreen(
                             homeLat,
                             homeLng,
                             searchRadiusKm,
-                            childSummary.ifBlank { null }
+                            childSummary.ifBlank { null },
+                            bannerImageUrl
                         )
                     },
                     enabled = !isBusy && displayName.isNotBlank(),

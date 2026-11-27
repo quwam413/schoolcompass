@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CastForEducation
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.School
@@ -40,11 +42,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.Enrollment
 import com.example.data.SchoolSearchFilter
 import com.example.data.SchoolWithDistance
@@ -60,7 +64,9 @@ fun DashboardScreen(
     savedSchoolsCount: Int,
     enrollmentsState: UiState<List<Enrollment>>,
     conversationCount: Int,
+    bannerImageUrl: String? = null,
     isPlatformAdmin: Boolean = false,
+    onEditProfile: () -> Unit = {},
     onNavigateTab: (MainTab) -> Unit,
     onRefreshOnline: () -> Unit,
     onBack: () -> Unit
@@ -86,19 +92,65 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Welcome back, ${displayName.ifBlank { "Member" }}",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${userRole.replaceFirstChar { it.uppercase() }} workspace • ${filter.centerLabel} (${filter.radiusKm} km radius)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(136.dp)
+                    ) {
+                        BannerImage(
+                            imageUrl = bannerImageUrl,
+                            fallbackResId = R.drawable.img_campus_hero,
+                            contentDescription = "${displayName.ifBlank { "Member" }} display banner",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                                .testTag("dashboard_user_banner")
+                        )
+                        Surface(
+                            onClick = onEditProfile,
+                            shape = RoundedCornerShape(999.dp),
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(10.dp)
+                                .testTag("dashboard_edit_banner_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Edit,
+                                    contentDescription = "Edit banner picture",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Edit Picture",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                    Column(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "Welcome back, ${displayName.ifBlank { "Member" }}",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${userRole.replaceFirstChar { it.uppercase() }} workspace • ${filter.centerLabel} (${filter.radiusKm} km radius)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -123,6 +175,7 @@ fun DashboardScreen(
                             Spacer(Modifier.size(6.dp))
                             Text("Sync Google", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
+                    }
                     }
                 }
             }

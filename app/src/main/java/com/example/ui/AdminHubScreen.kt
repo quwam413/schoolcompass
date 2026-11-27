@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,10 +48,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.Advert
 import com.example.data.AdvertInquiry
 import com.example.data.AttendanceLog
@@ -92,6 +96,7 @@ fun AdminHubScreen(
     adminAllPaymentsState: UiState<List<PaymentTransaction>> = UiState.Success(emptyList()),
     advertsState: UiState<List<Advert>> = UiState.Success(emptyList()),
     tutorsUiState: UiState<List<ProgressiveTutor>> = UiState.Success(emptyList()),
+    schoolVisitorCounts: Map<String, Int> = emptyMap(),
     isBusy: Boolean,
     onSaveSchool: (School, Boolean) -> Unit,
     onClearClaimingSchool: () -> Unit = {},
@@ -131,6 +136,9 @@ fun AdminHubScreen(
     val allSchools = (schoolsState as? UiState.Success)?.data ?: emptyList()
     val mySchools = remember(allSchools, currentUserId) {
         allSchools.filter { it.adminUid == currentUserId }
+    }
+    val totalSchoolVisits = remember(mySchools, schoolVisitorCounts) {
+        mySchools.sumOf { schoolVisitorCounts[it.id] ?: 0 }
     }
     val receivedPayments = (receivedPaymentsState as? UiState.Success)?.data ?: emptyList()
 
@@ -304,8 +312,15 @@ fun AdminHubScreen(
                         )
                     }
                 } else {
+                    item {
+                        PageVisitorsBadge(
+                            visitorCount = totalSchoolVisits,
+                            testTag = "admin_total_school_visits"
+                        )
+                    }
                     items(mySchools, key = { it.id }) { school ->
                         val ratio = (school.enrolledCount.toFloat() / school.capacity.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+                        val schoolVisits = schoolVisitorCounts[school.id] ?: 0
                         Surface(
                             shape = MaterialTheme.shapes.large,
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -316,6 +331,16 @@ fun AdminHubScreen(
                                 modifier = Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                BannerImage(
+                                    imageUrl = school.bannerImageUrl,
+                                    fallbackResId = R.drawable.img_campus_hero,
+                                    contentDescription = "${school.name} display banner",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(112.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .testTag("school_card_banner_${school.id}")
+                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -337,6 +362,10 @@ fun AdminHubScreen(
                                         Text("Edit")
                                     }
                                 }
+                                PageVisitorsBadge(
+                                    visitorCount = schoolVisits,
+                                    testTag = "school_visits_badge_${school.id}"
+                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,

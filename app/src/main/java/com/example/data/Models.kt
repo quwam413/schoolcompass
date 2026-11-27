@@ -183,6 +183,7 @@ data class UserProfile(
     val homeLng: Double = 3.4737,
     val searchRadiusKm: Long = 15L,
     val childSummary: String? = null,
+    val bannerImageUrl: String? = null,
     val favoriteSchoolIds: List<String> = emptyList(),
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
@@ -231,6 +232,7 @@ data class School(
     val googleMapsUrl: String? = null,
     val admissionWindow: String? = null,
     val boardingOption: String? = null,
+    val bannerImageUrl: String? = null,
     val photoUrls: List<String> = emptyList(),
     val extraNotes: String? = null,
     val lastEnrichedByName: String? = null,
@@ -542,6 +544,7 @@ data class Advert(
     val longitude: Double = 3.4737,
     val ctaLabel: String = "Learn More",
     val contactInfo: String? = null,
+    val bannerImageUrl: String? = null,
     val status: String = "ACTIVE",
     val paymentId: String? = null,
     val paymentStatus: String? = null,
@@ -599,6 +602,7 @@ data class ProgressiveTutor(
     val websiteUrl: String? = null,
     val googleMapsUrl: String? = null,
     val contactPhone: String? = null,
+    val bannerImageUrl: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -742,4 +746,19 @@ data class AppVisitLog(
     val role: String = "parent",
     val platform: String = "android",
     @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@Keep
+@IgnoreExtraProperties
+data class PageVisitRecord(
+    @DocumentId val id: String = "",
+    val pageType: String = "school",
+    val targetId: String = "",
+    val targetTitle: String = "",
+    val ownerUid: String = "",
+    val visitorUid: String = "",
+    val visitorName: String = "",
+    val visitHits: Long = 1L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )

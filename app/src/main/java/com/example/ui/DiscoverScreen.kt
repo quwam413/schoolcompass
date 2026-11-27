@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -69,12 +70,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -88,6 +93,7 @@ import com.example.data.FaithFilter
 import com.example.data.GoogleMapsPlatformService
 import com.example.data.School
 import com.example.data.SchoolSearchFilter
+import kotlinx.coroutines.launch
 import com.example.data.SchoolWithDistance
 import com.example.data.SpecialFilter
 import com.example.ui.theme.FavoriteHeartColor
@@ -140,7 +146,10 @@ fun DiscoverScreen(
     onOpenAiAdvisor: () -> Unit = {},
     selectedSchoolDetailState: UiState<School?> = UiState.Success(null),
     selectedSchoolAnnouncementsState: UiState<List<Announcement>> = UiState.Success(emptyList()),
-    onSelectSchoolForDetail: (School?) -> Unit = {}
+    currentUserId: String = "",
+    schoolVisitorCounts: Map<String, Int> = emptyMap(),
+    onSelectSchoolForDetail: (School?) -> Unit = {},
+    searchFocusTick: Int = 0
 ) {
     val context = LocalContext.current
     val fusedClient = remember(context) {
@@ -159,6 +168,20 @@ fun DiscoverScreen(
     var selectedSchoolItem by remember { mutableStateOf<SchoolWithDistance?>(null) }
     var inspectedAdvert by remember { mutableStateOf<Advert?>(null) }
     var enrichingSchool by remember { mutableStateOf<School?>(null) }
+    val searchFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val phoneListState = rememberLazyListState()
+    val wideListState = rememberLazyListState()
+
+    LaunchedEffect(searchFocusTick) {
+        if (searchFocusTick > 0) {
+            runCatching { phoneListState.animateScrollToItem(1) }
+            runCatching { wideListState.animateScrollToItem(0) }
+            delay(80L)
+            runCatching { searchFocusRequester.requestFocus() }
+            runCatching { keyboardController?.show() }
+        }
+    }
 
     LaunchedEffect(selectedSchoolItem?.school?.id) {
         onSelectSchoolForDetail(selectedSchoolItem?.school)
@@ -179,8 +202,11 @@ fun DiscoverScreen(
         position = CameraPosition.fromLatLngZoom(centerLatLng, zoomForRadiusKm(filter.radiusKm))
     }
 
+    val hasValidGoogleMapsKey = remember { GoogleMapsPlatformService.hasValidGoogleMapsKey() }
     var mapsSdkReady by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
+    LaunchedEffect(hasValidGoogleMapsKey) {
+        if (!hasValidGoogleMapsKey) return@LaunchedEffect
+        withFrameNanos { }
         val status = runCatching {
             MapsInitializer.initialize(context.applicationContext)
         }.getOrDefault(-1)
@@ -206,22 +232,27 @@ fun DiscoverScreen(
         }
     }
 
+    val gpsScope = androidx.compose.runtime.rememberCoroutineScope()
+
     @SuppressLint("MissingPermission")
     fun centerOnGps() {
         isLocatingUser = true
         locationDeniedHint = false
         val cts = CancellationTokenSource()
         fun applyGpsCoordinates(lat: Double, lng: Double) {
-            onUpdateFilter {
-                it.copy(
-                    centerLat = lat,
-                    centerLng = lng,
-                    centerLabel = "Current GPS",
-                    userGpsLat = lat,
-                    userGpsLng = lng,
-                    limitByRadius = true,
-                    lockToNigeria = if (GoogleMapsPlatformService.isInsideNigeriaBounds(lat, lng)) it.lockToNigeria else false
-                )
+            gpsScope.launch {
+                val placeLabel = GoogleMapsPlatformService.resolveHumanReadableLocation(context, lat, lng)
+                onUpdateFilter {
+                    it.copy(
+                        centerLat = lat,
+                        centerLng = lng,
+                        centerLabel = placeLabel,
+                        userGpsLat = lat,
+                        userGpsLng = lng,
+                        limitByRadius = true,
+                        lockToNigeria = if (GoogleMapsPlatformService.isInsideNigeriaBounds(lat, lng)) it.lockToNigeria else false
+                    )
+                }
             }
         }
         val client = fusedClient
@@ -392,42 +423,11 @@ fun DiscoverScreen(
                 keyboardActions = KeyboardActions(onSearch = { onSearchOnline() }),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .focusRequester(searchFocusRequester)
                     .testTag("discover_search_input")
             )
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item {
-                    FilterChip(
-                        selected = filter.onlyFavorites,
-                        onClick = { onUpdateFilter { it.copy(onlyFavorites = !it.onlyFavorites) } },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Filled.Favorite,
-                                contentDescription = null,
-                                tint = if (filter.onlyFavorites) FavoriteHeartColor else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        },
-                        label = { Text("Saved (${favoriteSchoolIds.size})") },
-                        modifier = Modifier.testTag("favorites_filter_chip")
-                    )
-                }
-                item {
-                    FilterChip(
-                        selected = false,
-                        onClick = onOpenAiAdvisor,
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Filled.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                        },
-                        label = { Text("Ask AI") },
-                        modifier = Modifier.testTag("discover_ai_advisor_chip")
-                    )
-                }
                 items(listOf("Primary & Secondary", "University")) { instType ->
                     FilterChip(
                         selected = filter.institutionType == instType,
@@ -589,6 +589,7 @@ fun DiscoverScreen(
                     }
 
                     LazyColumn(
+                        state = wideListState,
                         modifier = Modifier
                             .weight(0.50f)
                             .fillMaxHeight(),
@@ -655,6 +656,7 @@ fun DiscoverScreen(
             }
         } else {
             LazyColumn(
+                state = phoneListState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -764,11 +766,15 @@ fun DiscoverScreen(
     selectedSchoolItem?.let { item ->
         val detailSchool = (selectedSchoolDetailState as? UiState.Success)?.data ?: item.school
         val isSelectedFav = (item.school.id in favoriteSchoolIds) || (detailSchool.id in favoriteSchoolIds)
+        val isOwned = currentUserId.isNotBlank() && detailSchool.adminUid == currentUserId
+        val visitorCount = schoolVisitorCounts[detailSchool.id] ?: 0
         SchoolDetailBottomSheet(
             item = item,
             firestoreDetailState = selectedSchoolDetailState,
             announcementsState = selectedSchoolAnnouncementsState,
             isFavorite = isSelectedFav,
+            isOwnedByCurrentUser = isOwned,
+            pageVisitorCount = visitorCount,
             onToggleFavorite = onToggleFavoriteSchool,
             onDismiss = { selectedSchoolItem = null },
             onMessageAdmin = { school ->
@@ -806,6 +812,17 @@ fun DiscoverScreen(
             title = { Text(ad.title, fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (!ad.bannerImageUrl.isNullOrBlank()) {
+                        BannerImage(
+                            imageUrl = ad.bannerImageUrl,
+                            fallbackResId = com.example.R.drawable.img_campus_hero,
+                            contentDescription = ad.title,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(136.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        )
+                    }
                     Text(
                         text = "${ad.advertiserName} • ${ad.planTier}",
                         style = MaterialTheme.typography.labelLarge,
@@ -846,6 +863,7 @@ internal data class HomeAdvertSlide(
     val title: String,
     val subtitle: String,
     val ctaText: String,
+    val bannerImageUrl: String? = null,
     val advert: Advert?,
     val schoolItem: SchoolWithDistance? = null,
     val isLiveSponsored: Boolean,
@@ -879,6 +897,7 @@ internal fun buildTenAdvertSlides(
                     title = live.title,
                     subtitle = "${live.advertiserName} • ${live.targetLocation.ifBlank { live.category }}",
                     ctaText = live.ctaLabel.ifBlank { "View Offer" },
+                    bannerImageUrl = live.bannerImageUrl,
                     advert = live,
                     schoolItem = null,
                     isLiveSponsored = true,
@@ -899,6 +918,7 @@ internal fun buildTenAdvertSlides(
                         if (s.address.isNotBlank()) append(" • ${s.address}")
                     },
                     ctaText = "View School",
+                    bannerImageUrl = s.bannerImageUrl,
                     advert = null,
                     schoolItem = item,
                     isLiveSponsored = false,
@@ -964,7 +984,7 @@ private fun AdvertSpotlightCarousel4x2(
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
         modifier = Modifier
             .fillMaxWidth()
-            .height(160.dp)
+            .height(144.dp)
             .testTag("home_advert_grid_4x2")
     ) {
         HorizontalPager(
@@ -992,11 +1012,32 @@ private fun AdvertSpotlightCarousel4x2(
                             else -> onDiscoverOnline()
                         }
                     }
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
                     .testTag("advert_slide_$slideIndex")
             ) {
+                if (!slide.bannerImageUrl.isNullOrBlank()) {
+                    BannerImage(
+                        imageUrl = slide.bannerImageUrl,
+                        fallbackResId = com.example.R.drawable.img_campus_hero,
+                        contentDescription = slide.title,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Black.copy(alpha = 0.42f),
+                                        Color.Black.copy(alpha = 0.78f)
+                                    )
+                                )
+                            )
+                    )
+                }
                 Column(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Top Bar: Badge + Index & Post Ad Link

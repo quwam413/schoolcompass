@@ -21,10 +21,15 @@ import com.example.data.Enrollment
 import com.example.data.ExternalSchoolService
 import com.example.data.FaithFilter
 import com.example.data.GoogleMapsPlatformService
+import com.example.data.GoogleNewsArticle
+import com.example.data.GoogleNewsTopic
 import com.example.data.GroundingSourceLink
+import com.example.data.HomeWidgetsService
 import com.example.data.OnlineSchoolGroundingService
+import com.example.data.PageVisitRecord
 import com.example.data.PaymentRepository
 import com.example.data.PaymentTransaction
+import com.example.data.PixelWeatherSnapshot
 import com.example.data.PlatformAdminRecord
 import com.example.data.ProgressiveTutor
 import com.example.data.School
@@ -42,6 +47,8 @@ import com.example.data.TutorSession
 import com.example.data.TutorWithDistance
 import com.example.data.UserProfile
 import com.example.data.calculateDistanceKm
+import com.example.radio.RadioPlaybackController
+import com.example.radio.RadioPlaybackState
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -77,6 +84,7 @@ sealed interface UiState<out T> {
 }
 
 enum class MainTab {
+    HOME,
     DISCOVER,
     DASHBOARD,
     SAVED,
@@ -86,6 +94,8 @@ enum class MainTab {
     ADMIN,
     PLATFORM_ADMIN,
     ADVERTS,
+    RADIO,
+    GAMES,
     AI_ADVISOR,
     SETTINGS,
     HELP
@@ -167,6 +177,18 @@ class SchoolViewModel(
     val announcementsState: StateFlow<UiState<List<Announcement>>> =
         repository.observeAnnouncements().toUiStateFlow()
 
+    private val _dismissedAnnouncementIds = MutableStateFlow<Set<String>>(emptySet())
+    val dismissedAnnouncementIds: StateFlow<Set<String>> = _dismissedAnnouncementIds.asStateFlow()
+
+    val visibleNotificationsState: StateFlow<List<Announcement>> =
+        combine(announcementsState, _dismissedAnnouncementIds) { state, dismissed ->
+            (state as? UiState.Success)?.data.orEmpty().filter { it.id !in dismissed }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            initialValue = emptyList()
+        )
+
     val advertsState: StateFlow<UiState<List<Advert>>> =
         repository.observeAdverts().toUiStateFlow()
 
@@ -240,13 +262,44 @@ class SchoolViewModel(
             else flowOf(emptyList())
         }.toUiStateFlow()
 
+    val ownerPageVisitsState: StateFlow<UiState<List<PageVisitRecord>>> =
+        repository.observeOwnerPageVisits(currentUserId).toUiStateFlow()
+
+    val schoolVisitorCounts: StateFlow<Map<String, Int>> =
+        ownerPageVisitsState
+            .map { state ->
+                val list = (state as? UiState.Success)?.data.orEmpty()
+                list.filter { it.pageType == "school" && it.targetId.isNotBlank() }
+                    .groupBy { it.targetId }
+                    .mapValues { (_, records) -> records.distinctBy { it.visitorUid }.size }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = emptyMap()
+            )
+
+    val tutorVisitorCounts: StateFlow<Map<String, Int>> =
+        ownerPageVisitsState
+            .map { state ->
+                val list = (state as? UiState.Success)?.data.orEmpty()
+                list.filter { it.pageType == "tutor" && it.targetId.isNotBlank() }
+                    .groupBy { it.targetId }
+                    .mapValues { (_, records) -> records.distinctBy { it.visitorUid }.size }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+                initialValue = emptyMap()
+            )
+
     private val _searchFilter = MutableStateFlow(SchoolSearchFilter())
     val searchFilter: StateFlow<SchoolSearchFilter> = _searchFilter.asStateFlow()
 
     private val _tutorFilter = MutableStateFlow(TutorSearchFilter())
     val tutorFilter: StateFlow<TutorSearchFilter> = _tutorFilter.asStateFlow()
 
-    private val _selectedTab = MutableStateFlow(MainTab.DISCOVER)
+    private val _selectedTab = MutableStateFlow(MainTab.HOME)
     val selectedTab: StateFlow<MainTab> = _selectedTab.asStateFlow()
 
     private val _selectedConversation = MutableStateFlow<Conversation?>(null)
@@ -321,6 +374,18 @@ class SchoolViewModel(
     private val _isAiGenerating = MutableStateFlow(false)
     val isAiGenerating: StateFlow<Boolean> = _isAiGenerating.asStateFlow()
 
+    private val _pixelWeatherState = MutableStateFlow<UiState<PixelWeatherSnapshot>>(UiState.Loading)
+    val pixelWeatherState: StateFlow<UiState<PixelWeatherSnapshot>> = _pixelWeatherState.asStateFlow()
+
+    private val _googleNewsState = MutableStateFlow<UiState<List<GoogleNewsArticle>>>(UiState.Loading)
+    val googleNewsState: StateFlow<UiState<List<GoogleNewsArticle>>> = _googleNewsState.asStateFlow()
+
+    private val _selectedNewsTopic = MutableStateFlow<GoogleNewsTopic?>(null)
+    val selectedNewsTopic: StateFlow<GoogleNewsTopic?> = _selectedNewsTopic.asStateFlow()
+
+    private val radioController = RadioPlaybackController()
+    val radioPlaybackState: StateFlow<RadioPlaybackState> = radioController.state
+
     private val _uiMessages = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val uiMessages = _uiMessages.asSharedFlow()
 
@@ -350,9 +415,13 @@ class SchoolViewModel(
                 }
                 .debounce(550L)
                 .collect { key ->
+                    viewModelScope.launch {
+                        refreshUserWeatherInternal(key.lat, key.lng, _searchFilter.value.centerLabel)
+                    }
                     fetchExternalSchoolsInternal(key.lat, key.lng, key.radiusKm)
                 }
         }
+        refreshGoogleNews()
         viewModelScope.launch {
             _searchFilter
                 .map { it.query.trim() }
@@ -424,7 +493,16 @@ class SchoolViewModel(
                 if (isAdmin) {
                     refreshPlatformAnalyticsSql()
                 } else if (_selectedTab.value == MainTab.PLATFORM_ADMIN) {
-                    _selectedTab.value = MainTab.DISCOVER
+                    _selectedTab.value = MainTab.HOME
+                }
+            }
+        }
+        viewModelScope.launch {
+            combine(userProfileState, isPlatformAdminState) { profState, isAdmin ->
+                (profState as? UiState.Success)?.data?.role to isAdmin
+            }.collect { (role, isAdmin) ->
+                if (role.equals("parent", ignoreCase = true) && !isAdmin && _selectedTab.value == MainTab.ADMIN) {
+                    _selectedTab.value = MainTab.HOME
                 }
             }
         }
@@ -679,7 +757,31 @@ class SchoolViewModel(
             _uiMessages.tryEmit("Restricted: Admin access required")
             return
         }
+        if (tab == MainTab.ADMIN) {
+            val profileRole = (userProfileState.value as? UiState.Success)?.data?.role
+            if (profileRole.equals("parent", ignoreCase = true) && !isPlatformAdminState.value) {
+                _uiMessages.tryEmit("School Hub is restricted to registered School accounts")
+                return
+            }
+        }
         _selectedTab.value = tab
+    }
+
+    fun dismissNotification(announcementId: String) {
+        if (announcementId.isBlank()) return
+        _dismissedAnnouncementIds.update { it + announcementId }
+    }
+
+    fun clearAllNotifications() {
+        val currentIds = (announcementsState.value as? UiState.Success)
+            ?.data
+            .orEmpty()
+            .mapNotNull { it.id.takeIf(String::isNotBlank) }
+            .toSet()
+        if (currentIds.isNotEmpty()) {
+            _dismissedAnnouncementIds.update { it + currentIds }
+        }
+        _uiMessages.tryEmit("Notifications cleared")
     }
 
     fun clearLatestPaymentReceipt() {
@@ -739,6 +841,37 @@ class SchoolViewModel(
             ExternalSchoolService.claimSchoolDocId(it)
         }
         _selectedDetailSchoolId.value = validId
+        if (school.hasPlatformAdmin() && school.adminUid != currentUserId) {
+            recordSchoolPageVisit(school)
+        }
+    }
+
+    fun recordSchoolPageVisit(school: School) {
+        if (!school.hasPlatformAdmin() || school.adminUid == currentUserId || school.id.isBlank()) return
+        val visitorName = currentDisplayName()
+        viewModelScope.launch {
+            repository.recordPageVisit(
+                pageType = "school",
+                targetId = school.id,
+                targetTitle = school.name,
+                ownerUid = school.adminUid,
+                visitorName = visitorName
+            )
+        }
+    }
+
+    fun recordTutorPageVisit(tutor: ProgressiveTutor) {
+        if (tutor.teacherUid.isBlank() || tutor.teacherUid == currentUserId || tutor.id.isBlank()) return
+        val visitorName = currentDisplayName()
+        viewModelScope.launch {
+            repository.recordPageVisit(
+                pageType = "tutor",
+                targetId = tutor.id,
+                targetTitle = tutor.fullName,
+                ownerUid = tutor.teacherUid,
+                visitorName = visitorName
+            )
+        }
     }
 
     fun saveUserProfile(
@@ -751,6 +884,7 @@ class SchoolViewModel(
         homeLng: Double,
         searchRadiusKm: Int,
         childSummary: String?,
+        bannerImageUrl: String? = existing?.bannerImageUrl,
         onSuccess: () -> Unit = {}
     ) {
         viewModelScope.launch {
@@ -765,7 +899,8 @@ class SchoolViewModel(
                 homeLat = homeLat,
                 homeLng = homeLng,
                 searchRadiusKm = searchRadiusKm,
-                childSummary = childSummary
+                childSummary = childSummary,
+                bannerImageUrl = bannerImageUrl
             )
             _isBusy.value = false
             res.onSuccess {
@@ -946,6 +1081,8 @@ class SchoolViewModel(
         viewModelScope.launch {
             _isHomeRefreshing.value = true
             try {
+                launch { refreshUserWeatherInternal(f.centerLat, f.centerLng, f.centerLabel) }
+                launch { refreshGoogleNewsInternal(_selectedNewsTopic.value) }
                 fetchExternalSchoolsInternal(f.centerLat, f.centerLng, f.radiusKm)
                 if (f.query.isNotBlank()) {
                     searchVerifiedSchoolsOnlineInternal(f.query)
@@ -954,6 +1091,113 @@ class SchoolViewModel(
                 _isHomeRefreshing.value = false
             }
         }
+    }
+
+    private suspend fun refreshUserWeatherInternal(lat: Double, lng: Double, label: String) {
+        if (_pixelWeatherState.value !is UiState.Success) {
+            _pixelWeatherState.value = UiState.Loading
+        }
+        val res = HomeWidgetsService.fetchWeatherForLocation(lat, lng, label)
+        res.onSuccess { snapshot ->
+            _pixelWeatherState.value = UiState.Success(snapshot)
+        }.onFailure { err ->
+            if (_pixelWeatherState.value !is UiState.Success) {
+                _pixelWeatherState.value = UiState.Error(err.localizedMessage ?: "Weather unavailable")
+            }
+        }
+    }
+
+    fun refreshUserWeather() {
+        val f = _searchFilter.value
+        viewModelScope.launch {
+            _pixelWeatherState.value = UiState.Loading
+            refreshUserWeatherInternal(f.centerLat, f.centerLng, f.centerLabel)
+        }
+    }
+
+    fun updateWeatherLocation(lat: Double, lng: Double, label: String) {
+        val initialLabel = label.takeUnless {
+            it.isBlank() || it.equals("Current GPS", ignoreCase = true)
+        }
+        if (initialLabel != null) {
+            _searchFilter.update {
+                it.copy(
+                    centerLat = lat,
+                    centerLng = lng,
+                    centerLabel = initialLabel
+                )
+            }
+        }
+        viewModelScope.launch {
+            _pixelWeatherState.value = UiState.Loading
+            val resolvedLabel = initialLabel ?: (
+                GoogleMapsPlatformService.reverseGeocodePlace(lat, lng)
+                    .getOrNull()
+                    ?.formattedAddress
+                    ?.takeIf { it.isNotBlank() }
+                    ?: _searchFilter.value.centerLabel
+            )
+            _searchFilter.update {
+                it.copy(
+                    centerLat = lat,
+                    centerLng = lng,
+                    centerLabel = resolvedLabel
+                )
+            }
+            refreshUserWeatherInternal(lat, lng, resolvedLabel)
+        }
+    }
+
+    fun selectNewsTopic(topic: GoogleNewsTopic?) {
+        _selectedNewsTopic.value = topic
+        val current = (_googleNewsState.value as? UiState.Success)?.data
+        if (current == null || (topic != null && current.none { it.topic == topic })) {
+            refreshGoogleNews(topic)
+        }
+    }
+
+    fun refreshGoogleNews(topicFilter: GoogleNewsTopic? = _selectedNewsTopic.value) {
+        viewModelScope.launch {
+            if (_googleNewsState.value !is UiState.Success) {
+                _googleNewsState.value = UiState.Loading
+            }
+            refreshGoogleNewsInternal(topicFilter)
+        }
+    }
+
+    private suspend fun refreshGoogleNewsInternal(topicFilter: GoogleNewsTopic?) {
+        val res = HomeWidgetsService.fetchGoogleNews(topicFilter)
+        res.onSuccess { articles ->
+            _googleNewsState.value = UiState.Success(articles)
+        }.onFailure { err ->
+            if (_googleNewsState.value !is UiState.Success) {
+                _googleNewsState.value = UiState.Error(err.localizedMessage ?: "Unable to fetch Google News")
+            }
+        }
+    }
+
+    fun selectRadioStation(index: Int) {
+        radioController.selectAndPlay(index)
+    }
+
+    fun toggleRadioPlayPause() {
+        radioController.togglePlayPause()
+    }
+
+    fun pauseRadio() {
+        radioController.pause()
+    }
+
+    fun skipRadioForward() {
+        radioController.skipForward()
+    }
+
+    fun skipRadioBackward() {
+        radioController.skipBackward()
+    }
+
+    fun addAndPlayCustomRadioStation(name: String, streamUrl: String) {
+        radioController.addAndPlayCustomStation(name, streamUrl)
     }
 
     fun submitOptionalSchoolDetails(
@@ -1005,6 +1249,11 @@ class SchoolViewModel(
     }
 
     fun startClaimingExternalSchool(school: School) {
+        val profileRole = (userProfileState.value as? UiState.Success)?.data?.role
+        if (profileRole.equals("parent", ignoreCase = true) && !isPlatformAdminState.value) {
+            _uiMessages.tryEmit("Switch to a School account in Registration Profile to claim a campus")
+            return
+        }
         _claimingExternalSchool.value = school
         _selectedTab.value = MainTab.ADMIN
     }
@@ -1802,6 +2051,32 @@ class SchoolViewModel(
         }
     }
 
+    fun deleteViolatingUser(
+        targetUser: UserProfile,
+        reason: String = "Platform rules violation"
+    ) {
+        if (!isPlatformAdminState.value) {
+            _uiMessages.tryEmit("Restricted: Platform admin access required")
+            return
+        }
+        val targetUid = targetUser.userId.ifBlank { targetUser.id }.trim()
+        if (targetUid == currentUserId) {
+            _uiMessages.tryEmit("You cannot delete your own active admin account")
+            return
+        }
+        viewModelScope.launch {
+            _isBusy.value = true
+            val res = repository.deleteUserAsPlatformAdmin(targetUser)
+            _isBusy.value = false
+            res.onSuccess {
+                val cleanReason = reason.trim().ifBlank { "Platform rules violation" }
+                _uiMessages.tryEmit("Removed ${targetUser.displayName.ifBlank { targetUser.email }} ($cleanReason)")
+            }.onFailure {
+                _uiMessages.tryEmit(it.localizedMessage ?: "Failed to delete user account")
+            }
+        }
+    }
+
     fun refreshPlatformAnalyticsSql() {
         if (!isPlatformAdminState.value) return
         viewModelScope.launch {
@@ -1809,6 +2084,11 @@ class SchoolViewModel(
                 _sqlAdminOverview.value = overview
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        radioController.release()
     }
 
     private data class Tuple4<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

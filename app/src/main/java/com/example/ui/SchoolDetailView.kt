@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -54,11 +56,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.Announcement
 import com.example.data.GoogleMapsPlatformService
 import com.example.data.School
@@ -76,6 +80,8 @@ fun SchoolDetailView(
     firestoreDetailState: UiState<School?>,
     announcementsState: UiState<List<Announcement>> = UiState.Success(emptyList()),
     isFavorite: Boolean = false,
+    isOwnedByCurrentUser: Boolean = false,
+    pageVisitorCount: Int = 0,
     onToggleFavorite: (School) -> Unit = {},
     onMessageAdmin: (School) -> Unit,
     onSubmitEnrollment: (School, String, String, String?, PaymentSubmissionDraft?) -> Unit,
@@ -100,6 +106,24 @@ fun SchoolDetailView(
             .testTag("school_detail_view"),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        BannerImage(
+            imageUrl = school.bannerImageUrl,
+            fallbackResId = R.drawable.img_campus_hero,
+            contentDescription = "${school.name} banner",
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(14.dp))
+                .testTag("school_detail_banner")
+        )
+
+        if (isOwnedByCurrentUser) {
+            PageVisitorsBadge(
+                visitorCount = pageVisitorCount,
+                testTag = "school_detail_visits_badge"
+            )
+        }
+
         // Real-time Firestore Sync Indicator
         when (firestoreDetailState) {
             UiState.Loading -> {

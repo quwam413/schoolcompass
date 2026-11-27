@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -291,7 +292,8 @@ class SchoolRepository(
         homeLat: Double,
         homeLng: Double,
         searchRadiusKm: Int,
-        childSummary: String?
+        childSummary: String?,
+        bannerImageUrl: String? = existing?.bannerImageUrl
     ): Result<Unit> {
         var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}"
         return try {
@@ -305,6 +307,7 @@ class SchoolRepository(
             val cleanPhone = phone?.trim()?.takeIf { it.isNotEmpty() }?.take(40)
             val cleanAddr = homeAddress?.trim()?.takeIf { it.isNotEmpty() }?.take(200)
             val cleanChild = childSummary?.trim()?.takeIf { it.isNotEmpty() }?.take(200)
+            val cleanBanner = sanitizeBannerUrl(bannerImageUrl)
 
             if (existing == null) {
                 val payload = mapOf(
@@ -318,6 +321,7 @@ class SchoolRepository(
                     "homeLng" to homeLng.coerceIn(-180.0, 180.0),
                     "searchRadiusKm" to searchRadiusKm.coerceIn(1, 100),
                     "childSummary" to cleanChild,
+                    "bannerImageUrl" to cleanBanner,
                     "favoriteSchoolIds" to emptyList<String>(),
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
@@ -335,6 +339,11 @@ class SchoolRepository(
                 if (cleanPhone != null) updates["phone"] = cleanPhone
                 if (cleanAddr != null) updates["homeAddress"] = cleanAddr
                 if (cleanChild != null) updates["childSummary"] = cleanChild
+                if (cleanBanner != null) {
+                    updates["bannerImageUrl"] = cleanBanner
+                } else if (existing.bannerImageUrl != null) {
+                    updates["bannerImageUrl"] = FieldValue.delete()
+                }
                 docRef.update(updates).await()
             }
             sqlSyncScope.launch {
@@ -348,7 +357,8 @@ class SchoolRepository(
                     homeLat = homeLat.coerceIn(-90.0, 90.0),
                     homeLng = homeLng.coerceIn(-180.0, 180.0),
                     searchRadiusKm = searchRadiusKm.coerceIn(1, 100),
-                    childSummary = cleanChild
+                    childSummary = cleanChild,
+                    bannerImageUrl = cleanBanner
                 )
             }
             Result.success(Unit)
@@ -423,6 +433,14 @@ class SchoolRepository(
             }
             .distinct()
             .take(maxItems)
+    }
+
+    private fun sanitizeBannerUrl(raw: String?): String? {
+        val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (trimmed.length < 8 || trimmed.length > 160_000) return null
+        val isHttp = trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("http://", ignoreCase = true)
+        val isDataImage = trimmed.matches(Regex("^data:image/[a-zA-Z0-9+]+;base64,.+"))
+        return if (isHttp || isDataImage) trimmed else null
     }
 
     private fun buildUnclaimedVerifiedPayload(school: School): Map<String, Any> {
@@ -687,6 +705,7 @@ class SchoolRepository(
             val safeMapsUrl = ExternalSchoolService.normalizeWebsiteUrl(school.googleMapsUrl)?.take(300)
             val safeWindow = school.admissionWindow?.trim()?.takeIf { it.isNotEmpty() }?.take(120)
             val safeBoarding = school.boardingOption?.takeIf { it in SchoolConstants.BOARDING_OPTIONS }
+            val safeBanner = sanitizeBannerUrl(school.bannerImageUrl)
             val safePhotos = sanitizeValidUrlList(school.photoUrls, 8, 300)
             val safeNotes = school.extraNotes?.trim()?.takeIf { it.isNotEmpty() }?.take(600)
 
@@ -747,6 +766,7 @@ class SchoolRepository(
                 if (safeMapsUrl != null) payload["googleMapsUrl"] = safeMapsUrl
                 if (safeWindow != null) payload["admissionWindow"] = safeWindow
                 if (safeBoarding != null) payload["boardingOption"] = safeBoarding
+                if (safeBanner != null) payload["bannerImageUrl"] = safeBanner
                 if (safePhotos.isNotEmpty()) payload["photoUrls"] = safePhotos
                 if (safeNotes != null) payload["extraNotes"] = safeNotes
                 docRef.set(payload).await()
@@ -795,6 +815,11 @@ class SchoolRepository(
                 if (safeMapsUrl != null) updates["googleMapsUrl"] = safeMapsUrl
                 if (safeWindow != null) updates["admissionWindow"] = safeWindow
                 if (safeBoarding != null) updates["boardingOption"] = safeBoarding
+                if (safeBanner != null) {
+                    updates["bannerImageUrl"] = safeBanner
+                } else {
+                    updates["bannerImageUrl"] = FieldValue.delete()
+                }
                 if (safePhotos.isNotEmpty()) updates["photoUrls"] = safePhotos
                 if (safeNotes != null) updates["extraNotes"] = safeNotes
                 docRef.update(updates).await()
@@ -1286,6 +1311,7 @@ class SchoolRepository(
                 ?: SchoolConstants.ADVERT_PLANS[1]
             val cleanCta = advert.ctaLabel.trim().ifEmpty { "Learn More" }.take(40)
             val cleanContact = advert.contactInfo?.trim()?.takeIf { it.isNotEmpty() }?.take(120)
+            val safeBanner = sanitizeBannerUrl(advert.bannerImageUrl)
             val safeStatus = advert.status.takeIf { it in listOf("ACTIVE", "PAUSED", "ENDED") } ?: "ACTIVE"
             val safePayId = advert.paymentId?.trim()?.takeIf { it.isNotEmpty() }?.take(128)
             val safePayStatus = advert.paymentStatus?.takeIf { it in listOf("UNPAID", "PAID", "PENDING_VERIFICATION") }
@@ -1307,6 +1333,7 @@ class SchoolRepository(
                     "longitude" to advert.longitude.coerceIn(-180.0, 180.0),
                     "ctaLabel" to cleanCta,
                     "contactInfo" to cleanContact,
+                    "bannerImageUrl" to safeBanner,
                     "status" to safeStatus,
                     "paymentId" to safePayId,
                     "paymentStatus" to safePayStatus,
@@ -1332,6 +1359,11 @@ class SchoolRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
                 if (cleanContact != null) updates["contactInfo"] = cleanContact
+                if (safeBanner != null) {
+                    updates["bannerImageUrl"] = safeBanner
+                } else {
+                    updates["bannerImageUrl"] = FieldValue.delete()
+                }
                 if (safePayId != null) updates["paymentId"] = safePayId
                 if (safePayStatus != null) updates["paymentStatus"] = safePayStatus
                 docRef.update(updates).await()
@@ -1418,9 +1450,10 @@ class SchoolRepository(
                 if (isEmpty()) add("Cambridge")
             }.distinct().take(4)
 
+            val safeBanner = sanitizeBannerUrl(tutor.bannerImageUrl)
             val docRef = db.collection("tutors").document(tutorId)
             if (isNew || tutor.id.isBlank()) {
-                val payload = mapOf(
+                val payload = mutableMapOf<String, Any>(
                     "teacherUid" to uid,
                     "fullName" to cleanName,
                     "sex" to safeSex,
@@ -1444,9 +1477,10 @@ class SchoolRepository(
                     "createdAt" to FieldValue.serverTimestamp(),
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
+                if (safeBanner != null) payload["bannerImageUrl"] = safeBanner
                 docRef.set(payload).await()
             } else {
-                val updates = mapOf(
+                val updates = mutableMapOf<String, Any>(
                     "fullName" to cleanName,
                     "sex" to safeSex,
                     "headline" to cleanHeadline,
@@ -1468,6 +1502,11 @@ class SchoolRepository(
                     "onlineActive" to tutor.onlineActive,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
+                if (safeBanner != null) {
+                    updates["bannerImageUrl"] = safeBanner
+                } else {
+                    updates["bannerImageUrl"] = FieldValue.delete()
+                }
                 docRef.update(updates).await()
             }
             Result.success(tutorId)
@@ -1774,7 +1813,124 @@ class SchoolRepository(
         }
     }
 
+    suspend fun deleteUserAsPlatformAdmin(targetUser: UserProfile): Result<Unit> {
+        val targetUid = targetUser.userId.ifBlank { targetUser.id }.trim()
+        val userPath = "users/$targetUid"
+        return try {
+            val adminUid = requireUserId()
+            require(targetUid.matches(Regex("^[a-zA-Z0-9_-]{1,128}$"))) { "Invalid user ID" }
+            require(targetUid != adminUid) { "You cannot delete your own active admin account" }
+            require(!targetUser.email.trim().equals(SchoolConstants.PLATFORM_ADMIN_EMAIL, ignoreCase = true)) {
+                "Primary platform owner cannot be deleted"
+            }
+
+            // Best-effort cleanup of content owned by the rule-violating user
+            runCatching {
+                val ownedSchools = db.collection("schools").whereEqualTo("adminUid", targetUid).get().await()
+                ownedSchools.documents.forEach { it.reference.delete().await() }
+            }
+            runCatching {
+                val ownedAdverts = db.collection("adverts").whereEqualTo("ownerUid", targetUid).get().await()
+                ownedAdverts.documents.forEach { it.reference.delete().await() }
+            }
+            runCatching {
+                val ownedTutors = db.collection("tutors").whereEqualTo("teacherUid", targetUid).get().await()
+                ownedTutors.documents.forEach { it.reference.delete().await() }
+            }
+            runCatching {
+                db.collection("platform_admins").document(targetUid).delete().await()
+            }
+
+            db.collection("users").document(targetUid).delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, userPath)
+            Result.failure(e)
+        }
+    }
+
     suspend fun fetchCloudSqlAdminOverview(): Result<CloudSqlAdminOverview> =
         cloudSqlClient.fetchAdminOverviewFromSql()
+
+    fun observeOwnerPageVisits(ownerUid: String): Flow<List<PageVisitRecord>> = flow {
+        val uid = requireUserId()
+        if (uid != ownerUid) throw IllegalStateException("User session mismatch")
+        val path = "page_visits"
+        emitAll(
+            db.collection(path)
+                .whereEqualTo("ownerUid", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(PageVisitRecord::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .logFirestoreErrors(OperationType.LIST, path, uid)
+        )
+    }
+
+    private fun pageVisitDocId(pageType: String, targetId: String, visitorUid: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("$pageType|$targetId|$visitorUid".toByteArray(Charsets.UTF_8))
+        val hex = digest.joinToString("") { "%02x".format(it) }.take(40)
+        return "pv_$hex"
+    }
+
+    suspend fun recordPageVisit(
+        pageType: String,
+        targetId: String,
+        targetTitle: String,
+        ownerUid: String,
+        visitorName: String
+    ): Result<Unit> {
+        val safeType = if (pageType == "tutor") "tutor" else "school"
+        val cleanTargetId = targetId.trim()
+        val cleanOwnerUid = ownerUid.trim()
+        if (!cleanTargetId.matches(Regex("^[a-zA-Z0-9_-]{1,128}$")) || cleanOwnerUid.isBlank()) {
+            return Result.success(Unit)
+        }
+        val uid = auth.currentUser?.uid?.takeIf { it.isNotBlank() } ?: return Result.success(Unit)
+        if (uid == cleanOwnerUid) {
+            return Result.success(Unit)
+        }
+        val visitId = pageVisitDocId(safeType, cleanTargetId, uid)
+        val path = "page_visits/$visitId"
+        return try {
+            val cleanTitle = targetTitle.trim().ifEmpty { "Skolquik Page" }.take(120)
+            val cleanVisitor = visitorName.trim().ifEmpty { "Skolquik Member" }.take(80)
+            val docRef = db.collection("page_visits").document(visitId)
+            val existingSnap = docRef.get().await()
+            if (existingSnap.exists()) {
+                docRef.update(
+                    mapOf(
+                        "targetTitle" to cleanTitle,
+                        "visitorName" to cleanVisitor,
+                        "visitHits" to FieldValue.increment(1L),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                docRef.set(
+                    mapOf(
+                        "pageType" to safeType,
+                        "targetId" to cleanTargetId,
+                        "targetTitle" to cleanTitle,
+                        "ownerUid" to cleanOwnerUid,
+                        "visitorUid" to uid,
+                        "visitorName" to cleanVisitor,
+                        "visitHits" to 1L,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, path)
+            Result.failure(e)
+        }
+    }
 
 }

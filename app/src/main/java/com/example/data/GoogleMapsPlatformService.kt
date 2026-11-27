@@ -145,6 +145,91 @@ object GoogleMapsPlatformService {
         }
     }
 
+    suspend fun reverseGeocodePlace(
+        latitude: Double,
+        longitude: Double
+    ): Result<GeocodedPlace> = withContext(Dispatchers.IO) {
+        if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0 || (latitude == 0.0 && longitude == 0.0)) {
+            return@withContext Result.failure(IllegalArgumentException("Invalid GPS coordinates"))
+        }
+
+        if (hasValidGoogleMapsKey()) {
+            try {
+                val url = "https://maps.googleapis.com/maps/api/geocode/json?latlng=$latitude,$longitude&key=${BuildConfig.MAPS_API_KEY.trim()}"
+                val req = Request.Builder().url(url).get().build()
+                httpClient.newCall(req).execute().use { resp ->
+                    val body = resp.body?.string().orEmpty()
+                    if (resp.isSuccessful && body.isNotBlank()) {
+                        parseGoogleGeocodingJson(body)?.let { place ->
+                            return@withContext Result.success(place)
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Fall through to worldwide OpenStreetMap Nominatim reverse geocoding
+            }
+        }
+
+        return@withContext try {
+            val nominatimUrl =
+                "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=$latitude&lon=$longitude&zoom=14&addressdetails=1&accept-language=en"
+            val req = Request.Builder()
+                .url(nominatimUrl)
+                .header("User-Agent", "SkolquikAndroid/2.0 (https://skolquik.app)")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful || body.isBlank()) {
+                    Result.failure(IllegalStateException("Reverse geocoding returned HTTP ${resp.code}"))
+                } else {
+                    parseNominatimReverseGeocodingJson(body, latitude, longitude)
+                        ?.let { Result.success(it) }
+                        ?: Result.failure(IllegalStateException("Unable to resolve location name"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    suspend fun resolveHumanReadableLocation(
+        context: Context?,
+        latitude: Double,
+        longitude: Double
+    ): String {
+        if (context != null) {
+            val deviceLabel = withContext(Dispatchers.IO) {
+                runCatching {
+                    val geocoder = android.location.Geocoder(context, Locale.getDefault())
+                    val addresses = geocoder.getFromLocation(latitude, longitude, 1).orEmpty()
+                    val first = addresses.firstOrNull() ?: return@runCatching null
+                    val parts = listOfNotNull(
+                        first.subLocality?.trim()?.takeIf { it.isNotEmpty() },
+                        (first.locality ?: first.subAdminArea)?.trim()?.takeIf { it.isNotEmpty() },
+                        first.adminArea?.trim()?.takeIf { it.isNotEmpty() },
+                        first.countryName?.trim()?.takeIf { it.isNotEmpty() }
+                    ).distinctBy { it.lowercase(Locale.US) }
+                    when {
+                        parts.isNotEmpty() -> parts.take(3).joinToString(", ")
+                        else -> first.getAddressLine(0)?.split(",")?.take(3)?.joinToString(",")?.trim()
+                    }
+                }.getOrNull()
+            }
+            if (!deviceLabel.isNullOrBlank()) {
+                return deviceLabel.take(120)
+            }
+        }
+
+        val remote = reverseGeocodePlace(latitude, longitude).getOrNull()
+        if (remote != null && remote.formattedAddress.isNotBlank()) {
+            return remote.formattedAddress.take(120)
+        }
+
+        return String.format(Locale.US, "Lat %.3f, Lng %.3f", latitude, longitude)
+    }
+
     fun parseGoogleGeocodingJson(jsonBody: String): GeocodedPlace? {
         val root = JSONObject(jsonBody)
         if (root.optString("status") != "OK") return null
@@ -172,9 +257,59 @@ object GoogleMapsPlatformService {
         val lng = first.optString("lon").toDoubleOrNull() ?: return null
         val display = first.optString("display_name").trim()
             .ifEmpty { String.format(Locale.US, "%.4f, %.4f", lat, lng) }
-        val compactLabel = display.split(",").take(2).joinToString(",").trim().ifEmpty { display }
+        val compactLabel = display.split(",").take(3).joinToString(",").trim().ifEmpty { display }
         return GeocodedPlace(
             formattedAddress = compactLabel.take(120),
+            latitude = lat,
+            longitude = lng,
+            source = "OpenStreetMap Geocoder"
+        )
+    }
+
+    fun parseNominatimReverseGeocodingJson(
+        jsonBody: String,
+        fallbackLat: Double = 0.0,
+        fallbackLng: Double = 0.0
+    ): GeocodedPlace? {
+        val trimmed = jsonBody.trimStart()
+        if (!trimmed.startsWith("{")) return null
+        val root = JSONObject(trimmed)
+        if (root.has("error")) return null
+        val lat = root.optString("lat").toDoubleOrNull() ?: fallbackLat
+        val lng = root.optString("lon").toDoubleOrNull() ?: fallbackLng
+        val addr = root.optJSONObject("address")
+
+        val primaryArea = listOf(
+            "neighbourhood", "suburb", "quarter", "city_district", "town", "village"
+        ).firstNotNullOfOrNull { key ->
+            addr?.optString(key)?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        val cityOrRegion = listOf(
+            "city", "municipality", "county", "state_district", "state"
+        ).firstNotNullOfOrNull { key ->
+            addr?.optString(key)?.trim()?.takeIf { it.isNotEmpty() }
+        }
+        val state = addr?.optString("state")?.trim()?.takeIf { it.isNotEmpty() }
+        val country = addr?.optString("country")?.trim()?.takeIf { it.isNotEmpty() }
+
+        val combinedParts = listOfNotNull(primaryArea, cityOrRegion, state, country)
+            .distinctBy { it.lowercase(Locale.US) }
+            .take(3)
+
+        val formatted = if (combinedParts.isNotEmpty()) {
+            combinedParts.joinToString(", ")
+        } else {
+            val rawDisplay = root.optString("display_name").trim()
+            rawDisplay.split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .take(3)
+                .joinToString(", ")
+                .ifEmpty { String.format(Locale.US, "Lat %.3f, Lng %.3f", lat, lng) }
+        }
+
+        return GeocodedPlace(
+            formattedAddress = formatted.take(120),
             latitude = lat,
             longitude = lng,
             source = "OpenStreetMap Geocoder"

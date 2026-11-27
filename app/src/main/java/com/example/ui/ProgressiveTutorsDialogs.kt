@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.ProgressiveTutor
 import com.example.data.SchoolConstants
 import com.example.data.TutorSession
@@ -65,6 +66,9 @@ fun TutorEditorDialog(
     var nigerianSelected by remember {
         mutableStateOf(existingTutor?.nigerianSubjects?.toSet() ?: setOf("WAEC / NECO Mathematics"))
     }
+    var bannerImageUrl by remember(existingTutor) {
+        mutableStateOf(existingTutor?.bannerImageUrl)
+    }
 
     val hasAnySubject = cambridgeSelected.isNotEmpty() || nigerianSelected.isNotEmpty()
 
@@ -83,6 +87,15 @@ fun TutorEditorDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                BannerImageEditorSection(
+                    bannerImageUrl = bannerImageUrl,
+                    fallbackResId = R.drawable.img_portal_academic,
+                    title = "Tutor Display Banner Picture",
+                    subtitle = "Shown on your tutor card and Home adverts across Skolquik",
+                    testTagPrefix = "tutor_banner",
+                    onBannerChanged = { bannerImageUrl = it }
+                )
+
                 OutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it },
@@ -253,7 +266,8 @@ fun TutorEditorDialog(
                             latitude = lat,
                             longitude = lng,
                             rating = existingTutor?.rating ?: 4.8,
-                            onlineActive = true
+                            onlineActive = true,
+                            bannerImageUrl = bannerImageUrl
                         ),
                         existingTutor == null
                     )

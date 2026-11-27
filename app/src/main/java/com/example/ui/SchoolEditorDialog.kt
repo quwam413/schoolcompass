@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.data.School
 import com.example.data.SchoolConstants
 import com.example.data.SchoolVerificationResult
@@ -83,6 +84,7 @@ fun SchoolEditorSheet(
     var websiteUrl by remember(existingSchool) { mutableStateOf(existingSchool?.websiteUrl ?: "") }
     var verificationStatus by remember(existingSchool) { mutableStateOf(existingSchool?.verificationStatus ?: "UNVERIFIED") }
     var verificationSource by remember(existingSchool) { mutableStateOf(existingSchool?.verificationSource) }
+    var bannerImageUrl by remember(existingSchool) { mutableStateOf(existingSchool?.bannerImageUrl) }
 
     var name by remember(existingSchool) { mutableStateOf(existingSchool?.name ?: "") }
     var description by remember(existingSchool) {
@@ -169,6 +171,7 @@ fun SchoolEditorSheet(
         websiteUrl = claimed.websiteUrl ?: websiteUrl
         verificationStatus = claimed.verificationStatus
         verificationSource = claimed.verificationSource
+        bannerImageUrl = claimed.bannerImageUrl ?: bannerImageUrl
         curriculum = claimed.curriculum
         institutionType = claimed.institutionType
         faithBased = claimed.faithBased
@@ -296,7 +299,8 @@ fun SchoolEditorSheet(
             externalPlaceId = externalPlaceId,
             websiteUrl = websiteUrl.trim().ifBlank { null },
             verificationStatus = verificationStatus,
-            verificationSource = verificationSource
+            verificationSource = verificationSource,
+            bannerImageUrl = bannerImageUrl
         )
     }
 
@@ -367,6 +371,15 @@ fun SchoolEditorSheet(
                     )
                 }
             }
+
+            BannerImageEditorSection(
+                bannerImageUrl = bannerImageUrl,
+                fallbackResId = R.drawable.img_campus_hero,
+                title = "School Display Banner Picture",
+                subtitle = "Shown on your school page, search listings, and Home adverts",
+                testTagPrefix = "school_banner",
+                onBannerChanged = { bannerImageUrl = it }
+            )
 
             OutlinedTextField(
                 value = name,

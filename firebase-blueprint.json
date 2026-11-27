@@ -15,6 +15,7 @@
         "homeLng": { "type": "number", "description": "Longitude of default search center." },
         "searchRadiusKm": { "type": "integer", "description": "Preferred school search radius in kilometers." },
         "childSummary": { "type": "string", "description": "Optional summary of child grade interests." },
+        "bannerImageUrl": { "type": "string", "description": "Optional user display banner picture URL or data URI." },
         "favoriteSchoolIds": { "type": "array", "description": "List of school IDs saved by the user as favorites." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp on creation." },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp on update." }
@@ -65,6 +66,7 @@
         "googleMapsUrl": { "type": "string", "description": "Direct Google Maps listing URL." },
         "admissionWindow": { "type": "string", "description": "Optional admission dates or intake window." },
         "boardingOption": { "type": "string", "enum": ["Day", "Boarding", "Day & Boarding", "Not Specified"], "description": "Optional day vs boarding schedule." },
+        "bannerImageUrl": { "type": "string", "description": "Optional custom display banner picture URL or data URI." },
         "photoUrls": { "type": "array", "description": "Optional campus photo URLs contributed by schools or users." },
         "extraNotes": { "type": "string", "description": "Optional extra notes contributed by schools or users." },
         "lastEnrichedByName": { "type": "string", "description": "Display name of the last school admin or user who added extra details." },
@@ -232,6 +234,7 @@
         "longitude": { "type": "number" },
         "ctaLabel": { "type": "string" },
         "contactInfo": { "type": "string" },
+        "bannerImageUrl": { "type": "string", "description": "Optional advert banner picture URL or data URI." },
         "status": { "type": "string", "enum": ["ACTIVE", "PAUSED", "ENDED"] },
         "paymentId": { "type": "string" },
         "paymentStatus": { "type": "string", "enum": ["UNPAID", "PAID", "PENDING_VERIFICATION"] },
@@ -290,6 +293,7 @@
         "longitude": { "type": "number" },
         "rating": { "type": "number" },
         "onlineActive": { "type": "boolean" },
+        "bannerImageUrl": { "type": "string", "description": "Optional tutor banner picture URL or data URI." },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -399,6 +403,23 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "userEmail", "displayName", "role", "platform", "createdAt"]
+    },
+    "PageVisitRecord": {
+      "title": "PageVisitRecord",
+      "description": "Unique visitor record tracking how many people visited a registered school or tutor page.",
+      "type": "object",
+      "properties": {
+        "pageType": { "type": "string", "enum": ["school", "tutor"] },
+        "targetId": { "type": "string" },
+        "targetTitle": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "visitorUid": { "type": "string" },
+        "visitorName": { "type": "string" },
+        "visitHits": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pageType", "targetId", "targetTitle", "ownerUid", "visitorUid", "visitorName", "visitHits", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -469,6 +490,10 @@
     "/visit_logs/{visitId}": {
       "schema": { "$ref": "#/entities/VisitLog" },
       "description": "Per-session app visit records restricted to platform admins."
+    },
+    "/page_visits/{visitId}": {
+      "schema": { "$ref": "#/entities/PageVisitRecord" },
+      "description": "Unique visitor records for registered school and tutor pages."
     }
   }
 }

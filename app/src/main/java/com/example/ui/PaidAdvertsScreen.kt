@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,10 +53,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.data.Advert
 import com.example.data.AdvertInquiry
 import com.example.data.AdvertWithDistance
@@ -297,6 +300,16 @@ fun PaidAdvertsScreen(
                             modifier = Modifier.padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            BannerImage(
+                                imageUrl = ad.bannerImageUrl,
+                                fallbackResId = R.drawable.img_campus_hero,
+                                contentDescription = "${ad.title} banner",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .testTag("my_advert_banner_${ad.id}")
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -594,6 +607,16 @@ private fun SponsoredAdvertCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            BannerImage(
+                imageUrl = ad.bannerImageUrl,
+                fallbackResId = R.drawable.img_campus_hero,
+                contentDescription = "${ad.title} display banner",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(148.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .testTag("advert_banner_${ad.id}")
+            )
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -673,6 +696,7 @@ private fun AdvertEditorDialog(
     var targetLocation by remember { mutableStateOf(existingAdvert?.targetLocation ?: "Lekki Phase 1, Lagos") }
     var ctaLabel by remember { mutableStateOf(existingAdvert?.ctaLabel ?: "Inquire Now") }
     var contactInfo by remember { mutableStateOf(existingAdvert?.contactInfo ?: "") }
+    var bannerImageUrl by remember { mutableStateOf(existingAdvert?.bannerImageUrl) }
     var showCheckout by remember { mutableStateOf(false) }
 
     fun buildAdvert(): Advert {
@@ -696,7 +720,8 @@ private fun AdvertEditorDialog(
             contactInfo = contactInfo.ifBlank { null },
             status = existingAdvert?.status ?: "ACTIVE",
             paymentId = existingAdvert?.paymentId,
-            paymentStatus = existingAdvert?.paymentStatus
+            paymentStatus = existingAdvert?.paymentStatus,
+            bannerImageUrl = bannerImageUrl
         )
     }
 
@@ -746,6 +771,15 @@ private fun AdvertEditorDialog(
                             )
                         }
                     }
+
+                    BannerImageEditorSection(
+                        bannerImageUrl = bannerImageUrl,
+                        fallbackResId = R.drawable.img_campus_hero,
+                        title = "Advert Display Banner Picture",
+                        subtitle = "Shown on your Home advert card and Sponsored Feed listing",
+                        testTagPrefix = "advert_banner",
+                        onBannerChanged = { bannerImageUrl = it }
+                    )
 
                     OutlinedTextField(
                         value = advertiserName,

@@ -35,16 +35,21 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.CastForEducation
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FamilyRestroom
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BookmarkBorder
@@ -53,9 +58,16 @@ import androidx.compose.material.icons.outlined.CastForEducation
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FamilyRestroom
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Radio
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
@@ -65,6 +77,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarDefaults
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Scaffold
@@ -74,6 +90,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -88,6 +105,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.R
 import kotlinx.coroutines.launch
 
@@ -112,12 +130,23 @@ fun SkolquikMinimalShell(
     onSelectTab: (MainTab) -> Unit,
     onOpenProfile: () -> Unit,
     onSignOut: () -> Unit,
+    isSearchActive: Boolean = false,
+    onSearchClick: () -> Unit = { onSelectTab(MainTab.DISCOVER) },
+    notificationCount: Int = 0,
+    onNotificationsClick: () -> Unit = {},
+    onEmergencyCall: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     val exploreItems = listOf(
+        SidebarDestination(
+            tab = MainTab.HOME,
+            label = stringResource(R.string.tab_home),
+            selectedIcon = Icons.Filled.Home,
+            unselectedIcon = Icons.Outlined.Home
+        ),
         SidebarDestination(
             tab = MainTab.DISCOVER,
             label = stringResource(R.string.tab_discover),
@@ -148,6 +177,20 @@ fun SkolquikMinimalShell(
             label = stringResource(R.string.tab_progressive_tutors),
             selectedIcon = Icons.Filled.CastForEducation,
             unselectedIcon = Icons.Outlined.CastForEducation
+        ),
+        SidebarDestination(
+            tab = MainTab.RADIO,
+            label = stringResource(R.string.tab_radio),
+            selectedIcon = Icons.Filled.Radio,
+            unselectedIcon = Icons.Outlined.Radio,
+            badgeText = "LIVE"
+        ),
+        SidebarDestination(
+            tab = MainTab.GAMES,
+            label = stringResource(R.string.tab_educational_games),
+            selectedIcon = Icons.Filled.SportsEsports,
+            unselectedIcon = Icons.Outlined.SportsEsports,
+            badgeText = "3"
         )
     )
 
@@ -166,6 +209,7 @@ fun SkolquikMinimalShell(
         )
     )
 
+    val isSchoolAdminOrOversight = userRole.equals("admin", ignoreCase = true) || isPlatformAdmin
     val manageItems = buildList {
         add(
             SidebarDestination(
@@ -175,15 +219,17 @@ fun SkolquikMinimalShell(
                 unselectedIcon = Icons.Outlined.Campaign
             )
         )
-        add(
-            SidebarDestination(
-                tab = MainTab.ADMIN,
-                label = stringResource(R.string.tab_admin),
-                selectedIcon = Icons.Filled.AdminPanelSettings,
-                unselectedIcon = Icons.Outlined.AdminPanelSettings,
-                badgeText = if (isPlatformAdmin) "Oversight" else null
+        if (isSchoolAdminOrOversight) {
+            add(
+                SidebarDestination(
+                    tab = MainTab.ADMIN,
+                    label = stringResource(R.string.tab_admin),
+                    selectedIcon = Icons.Filled.AdminPanelSettings,
+                    unselectedIcon = Icons.Outlined.AdminPanelSettings,
+                    badgeText = if (isPlatformAdmin) "Oversight" else null
+                )
             )
-        )
+        }
         if (isPlatformAdmin) {
             add(
                 SidebarDestination(
@@ -213,7 +259,8 @@ fun SkolquikMinimalShell(
     )
 
     val sectionTitle = when (selectedTab) {
-        MainTab.DISCOVER -> stringResource(R.string.app_name)
+        MainTab.HOME -> stringResource(R.string.app_name)
+        MainTab.DISCOVER -> stringResource(R.string.tab_discover)
         MainTab.DASHBOARD -> stringResource(R.string.tab_dashboard)
         MainTab.SAVED -> stringResource(R.string.tab_saved)
         MainTab.AI_ADVISOR -> stringResource(R.string.tab_ai_advisor)
@@ -221,6 +268,8 @@ fun SkolquikMinimalShell(
         MainTab.MESSAGES -> stringResource(R.string.tab_messages)
         MainTab.PORTAL -> stringResource(R.string.tab_portal)
         MainTab.ADVERTS -> stringResource(R.string.tab_adverts)
+        MainTab.RADIO -> stringResource(R.string.tab_radio)
+        MainTab.GAMES -> stringResource(R.string.tab_educational_games)
         MainTab.ADMIN -> stringResource(R.string.tab_admin)
         MainTab.PLATFORM_ADMIN -> stringResource(R.string.tab_platform_admin)
         MainTab.SETTINGS -> stringResource(R.string.tab_settings)
@@ -231,23 +280,37 @@ fun SkolquikMinimalShell(
         scope.launch { drawerState.close() }
     }
 
-    BackHandler(enabled = !drawerState.isOpen && selectedTab != MainTab.DISCOVER) {
-        onSelectTab(MainTab.DISCOVER)
+    BackHandler(enabled = !drawerState.isOpen && selectedTab != MainTab.HOME) {
+        onSelectTab(MainTab.HOME)
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val usePermanentSidebar = maxWidth >= 840.dp
 
         @Composable
-        fun MainScaffold(showMenuButton: Boolean) {
+        fun MainScaffold(showMenuButton: Boolean, showBottomBar: Boolean) {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 snackbarHost = {
                     SnackbarHost(
                         hostState = snackbarHostState,
-                        modifier = Modifier.navigationBarsPadding()
+                        modifier = if (showBottomBar) Modifier else Modifier.navigationBarsPadding()
                     )
+                },
+                bottomBar = {
+                    if (showBottomBar) {
+                        SkolquikBottomBar(
+                            selectedTab = selectedTab,
+                            isSearchActive = isSearchActive,
+                            favoriteCount = favoriteCount,
+                            onSelectHome = { onSelectTab(MainTab.HOME) },
+                            onSelectDiscover = { onSelectTab(MainTab.DISCOVER) },
+                            onSelectAi = { onSelectTab(MainTab.AI_ADVISOR) },
+                            onSelectSaved = { onSelectTab(MainTab.SAVED) },
+                            onSelectSearch = onSearchClick
+                        )
+                    }
                 },
                 topBar = {
                     Column(
@@ -295,42 +358,47 @@ fun SkolquikMinimalShell(
                                                 .clip(RoundedCornerShape(7.dp))
                                         )
                                     }
-                                    Column {
-                                        Text(
-                                            text = sectionTitle,
-                                            style = MaterialTheme.typography.titleLarge,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        if (selectedTab == MainTab.DISCOVER) {
-                                            Text(
-                                                text = "Search Smart, Enroll Fast.",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
-                                    }
+                                    Text(
+                                        text = sectionTitle,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             },
                             actions = {
-                                if (selectedTab != MainTab.AI_ADVISOR) {
-                                    FilledTonalIconButton(
-                                        onClick = { onSelectTab(MainTab.AI_ADVISOR) },
-                                        modifier = Modifier
-                                            .padding(end = 6.dp)
-                                            .size(48.dp)
-                                            .testTag("open_ai_advisor_button")
+                                IconButton(
+                                    onClick = onNotificationsClick,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("top_bar_notifications_button")
+                                ) {
+                                    BadgedBox(
+                                        badge = {
+                                            if (notificationCount > 0) {
+                                                Badge {
+                                                    Text(if (notificationCount > 9) "9+" else "$notificationCount")
+                                                }
+                                            }
+                                        }
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Filled.AutoAwesome,
-                                            contentDescription = "Open Skolquik AI Advisor",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
+                                            imageVector = Icons.Outlined.Notifications,
+                                            contentDescription = "School updates and notifications"
                                         )
                                     }
+                                }
+                                IconButton(
+                                    onClick = onSearchClick,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("top_bar_search_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Search,
+                                        contentDescription = "Search schools"
+                                    )
                                 }
                             }
                         )
@@ -345,7 +413,7 @@ fun SkolquikMinimalShell(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .navigationBarsPadding()
+                        .let { mod -> if (showBottomBar) mod else mod.navigationBarsPadding() }
                 ) {
                     content()
                 }
@@ -379,11 +447,12 @@ fun SkolquikMinimalShell(
                         onClose = {},
                         onSelectTab = onSelectTab,
                         onOpenProfile = onOpenProfile,
-                        onSignOut = onSignOut
+                        onSignOut = onSignOut,
+                        onEmergencyCall = onEmergencyCall
                     )
                 }
                 Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                    MainScaffold(showMenuButton = false)
+                    MainScaffold(showMenuButton = false, showBottomBar = false)
                 }
             }
         } else {
@@ -418,13 +487,195 @@ fun SkolquikMinimalShell(
                             onSignOut = {
                                 scope.launch { drawerState.close() }
                                 onSignOut()
+                            },
+                            onEmergencyCall = {
+                                scope.launch { drawerState.close() }
+                                onEmergencyCall()
                             }
                         )
                     }
                 }
             ) {
-                MainScaffold(showMenuButton = true)
+                MainScaffold(showMenuButton = true, showBottomBar = true)
             }
+        }
+    }
+}
+
+@Composable
+private fun SkolquikBottomBar(
+    selectedTab: MainTab,
+    isSearchActive: Boolean,
+    favoriteCount: Int,
+    onSelectHome: () -> Unit,
+    onSelectDiscover: () -> Unit,
+    onSelectAi: () -> Unit,
+    onSelectSaved: () -> Unit,
+    onSelectSearch: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+        NavigationBar(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            windowInsets = NavigationBarDefaults.windowInsets,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("home_bottom_bar")
+        ) {
+            val itemColors = NavigationBarItemDefaults.colors(
+                selectedIconColor = MaterialTheme.colorScheme.primary,
+                selectedTextColor = MaterialTheme.colorScheme.primary,
+                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            val homeSelected = selectedTab == MainTab.HOME && !isSearchActive
+            NavigationBarItem(
+                selected = homeSelected,
+                onClick = onSelectHome,
+                colors = itemColors,
+                icon = {
+                    Icon(
+                        imageVector = if (homeSelected) Icons.Filled.Home else Icons.Outlined.Home,
+                        contentDescription = stringResource(R.string.nav_bottom_home)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.nav_bottom_home),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (homeSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bottom_nav_home")
+            )
+
+            val discoverSelected = selectedTab == MainTab.DISCOVER && !isSearchActive
+            NavigationBarItem(
+                selected = discoverSelected,
+                onClick = onSelectDiscover,
+                colors = itemColors,
+                icon = {
+                    Icon(
+                        imageVector = if (discoverSelected) Icons.Filled.Explore else Icons.Outlined.Explore,
+                        contentDescription = stringResource(R.string.nav_bottom_discover)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.nav_bottom_discover),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (discoverSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bottom_nav_discover")
+            )
+
+            val aiSelected = selectedTab == MainTab.AI_ADVISOR
+            NavigationBarItem(
+                selected = aiSelected,
+                onClick = onSelectAi,
+                colors = itemColors,
+                icon = {
+                    Icon(
+                        imageVector = if (aiSelected) Icons.Filled.AutoAwesome else Icons.Outlined.AutoAwesome,
+                        contentDescription = stringResource(R.string.nav_bottom_ai)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.nav_bottom_ai),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (aiSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bottom_nav_ai")
+            )
+
+            val savedSelected = selectedTab == MainTab.SAVED
+            NavigationBarItem(
+                selected = savedSelected,
+                onClick = onSelectSaved,
+                colors = itemColors,
+                icon = {
+                    BadgedBox(
+                        badge = {
+                            if (favoriteCount > 0) {
+                                Badge { Text("$favoriteCount") }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = if (savedSelected) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = stringResource(R.string.nav_bottom_saved)
+                        )
+                    }
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.nav_bottom_saved),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (savedSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bottom_nav_saved")
+            )
+
+            val searchSelected = selectedTab == MainTab.DISCOVER && isSearchActive
+            NavigationBarItem(
+                selected = searchSelected,
+                onClick = onSelectSearch,
+                colors = itemColors,
+                icon = {
+                    Icon(
+                        imageVector = if (searchSelected) Icons.Filled.Search else Icons.Outlined.Search,
+                        contentDescription = stringResource(R.string.nav_bottom_search)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.nav_bottom_search),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (searchSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .testTag("bottom_nav_search")
+            )
         }
     }
 }
@@ -443,7 +694,8 @@ private fun SkolquikSidebarContent(
     onClose: () -> Unit,
     onSelectTab: (MainTab) -> Unit,
     onOpenProfile: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onEmergencyCall: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -558,6 +810,51 @@ private fun SkolquikSidebarContent(
                     onClick = { onSelectTab(item.tab) }
                 )
             }
+
+            Spacer(Modifier.height(8.dp))
+            NavigationDrawerItem(
+                selected = false,
+                onClick = onEmergencyCall,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Filled.Call,
+                        contentDescription = stringResource(R.string.sidebar_emergency_call),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(R.string.sidebar_emergency_call),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                badge = {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.errorContainer
+                    ) {
+                        Text(
+                            text = "112",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = NavigationDrawerItemDefaults.colors(
+                    unselectedContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+                    .testTag("sidebar_emergency_call_112")
+            )
         }
 
         Spacer(Modifier.height(8.dp))

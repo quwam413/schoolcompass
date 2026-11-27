@@ -1,18 +1,42 @@
 package com.example
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -20,6 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,6 +55,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.auth.AuthManager
 import com.example.auth.AuthScreen
+import com.example.data.Announcement
 import com.example.data.NetworkMonitor
 import com.example.data.NotificationHelper
 import com.example.data.PaymentRepository
@@ -36,9 +64,12 @@ import com.example.ui.AdminHubScreen
 import com.example.ui.AiAdvisorScreen
 import com.example.ui.DashboardScreen
 import com.example.ui.DiscoverScreen
+import com.example.ui.EducationalGamesScreen
 import com.example.ui.HelpSupportScreen
+import com.example.ui.HomeAdvertsScreen
 import com.example.ui.MainTab
 import com.example.ui.MessagesScreen
+import com.example.ui.OnlineRadioScreen
 import com.example.ui.PaidAdvertsScreen
 import com.example.ui.ParentPortalScreen
 import com.example.ui.PaymentReceiptDialog
@@ -194,6 +225,7 @@ private fun AuthenticatedShell(
     val activePortalGradesState by viewModel.activePortalGradesState.collectAsStateWithLifecycle()
     val parentEnrollmentsState by viewModel.parentEnrollmentsState.collectAsStateWithLifecycle()
     val announcementsState by viewModel.announcementsState.collectAsStateWithLifecycle()
+    val visibleNotifications by viewModel.visibleNotificationsState.collectAsStateWithLifecycle()
     val adminEnrollmentsState by viewModel.adminEnrollmentsState.collectAsStateWithLifecycle()
     val adminStudentsState by viewModel.adminStudentsState.collectAsStateWithLifecycle()
     val selectedAdminStudentId by viewModel.selectedAdminStudentId.collectAsStateWithLifecycle()
@@ -240,6 +272,12 @@ private fun AuthenticatedShell(
     val sqlAdminOverview by viewModel.sqlAdminOverview.collectAsStateWithLifecycle()
     val cloudSqlStatus by viewModel.cloudSqlStatus.collectAsStateWithLifecycle()
     val isTestingCloudSql by viewModel.isTestingCloudSql.collectAsStateWithLifecycle()
+    val schoolVisitorCounts by viewModel.schoolVisitorCounts.collectAsStateWithLifecycle()
+    val tutorVisitorCounts by viewModel.tutorVisitorCounts.collectAsStateWithLifecycle()
+    val pixelWeatherState by viewModel.pixelWeatherState.collectAsStateWithLifecycle()
+    val googleNewsState by viewModel.googleNewsState.collectAsStateWithLifecycle()
+    val selectedNewsTopic by viewModel.selectedNewsTopic.collectAsStateWithLifecycle()
+    val radioPlaybackState by viewModel.radioPlaybackState.collectAsStateWithLifecycle()
     val isBusy by viewModel.isBusy.collectAsStateWithLifecycle()
 
     LaunchedEffect(searchFilter.centerLat, searchFilter.centerLng) {
@@ -248,6 +286,15 @@ private fun AuthenticatedShell(
 
     val snackbarHostState = remember { SnackbarHostState() }
     var showProfileEditor by remember { mutableStateOf(false) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
+    var discoverSearchTick by remember { mutableIntStateOf(0) }
+    var isSearchModeActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != MainTab.DISCOVER) {
+            isSearchModeActive = false
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.uiMessages.collect { msg ->
@@ -276,7 +323,7 @@ private fun AuthenticatedShell(
                     defaultName = userDisplayName,
                     defaultEmail = userEmail,
                     isBusy = isBusy,
-                    onSaveProfile = { role, name, phone, addr, lat, lng, radius, child ->
+                    onSaveProfile = { role, name, phone, addr, lat, lng, radius, child, bannerUrl ->
                         viewModel.saveUserProfile(
                             existing = profile,
                             role = role,
@@ -287,6 +334,7 @@ private fun AuthenticatedShell(
                             homeLng = lng,
                             searchRadiusKm = radius,
                             childSummary = child,
+                            bannerImageUrl = bannerUrl,
                             onSuccess = {
                                 showProfileEditor = false
                                 if (initialPreferAdminPortal || (profile == null && role == "admin")) {
@@ -315,7 +363,27 @@ private fun AuthenticatedShell(
         isPlatformAdmin = isPlatformAdmin,
         favoriteCount = favoriteSchoolIds.size,
         snackbarHostState = snackbarHostState,
-        onSelectTab = viewModel::selectTab,
+        isSearchActive = isSearchModeActive,
+        onSearchClick = {
+            isSearchModeActive = true
+            viewModel.selectTab(MainTab.DISCOVER)
+            discoverSearchTick++
+        },
+        notificationCount = visibleNotifications.size,
+        onNotificationsClick = { showNotificationsDialog = true },
+        onEmergencyCall = {
+            val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:112"))
+            val launched = runCatching { context.startActivity(dialIntent) }.isSuccess
+            if (!launched) {
+                scope.launch {
+                    snackbarHostState.showSnackbar("Dial 112 in your Phone app for emergency services.")
+                }
+            }
+        },
+        onSelectTab = { tab ->
+            isSearchModeActive = false
+            viewModel.selectTab(tab)
+        },
         onOpenProfile = { showProfileEditor = true },
         onSignOut = {
             AuthManager.signOut(
@@ -325,6 +393,31 @@ private fun AuthenticatedShell(
         }
     ) {
         when (selectedTab) {
+                        MainTab.HOME -> HomeAdvertsScreen(
+                            activeAdverts = activeAdvertsWithDistance.filter { it.advert.status == "ACTIVE" },
+                            schools = filteredSchools,
+                            tutors = filteredTutors,
+                            isLoading = advertsState is UiState.Loading && schoolsState is UiState.Loading && tutorsState is UiState.Loading,
+                            isRefreshing = isHomeRefreshing,
+                            isBusy = isBusy,
+                            defaultUserName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
+                            defaultUserEmail = userEmail,
+                            onRefreshHome = viewModel::refreshHomeFromPullDown,
+                            onOpenDiscover = { viewModel.selectTab(MainTab.DISCOVER) },
+                            onOpenTutors = { viewModel.selectTab(MainTab.TUTORS) },
+                            onOpenPaidAdverts = { viewModel.selectTab(MainTab.ADVERTS) },
+                            onSchoolVisited = viewModel::recordSchoolPageVisit,
+                            onTutorVisited = viewModel::recordTutorPageVisit,
+                            onSendAdvertInquiry = viewModel::submitAdvertInquiry,
+                            weatherState = pixelWeatherState,
+                            locationLabel = searchFilter.centerLabel,
+                            googleNewsState = googleNewsState,
+                            selectedNewsTopic = selectedNewsTopic,
+                            onSelectNewsTopic = viewModel::selectNewsTopic,
+                            onRefreshNews = { viewModel.refreshGoogleNews() },
+                            onRefreshWeather = viewModel::refreshUserWeather,
+                            onUseGpsWeather = viewModel::updateWeatherLocation
+                        )
                         MainTab.DISCOVER -> DiscoverScreen(
                             schoolsUiState = schoolsState,
                             filteredSchools = filteredSchools,
@@ -367,7 +460,13 @@ private fun AuthenticatedShell(
                                     contactPhone = phone
                                 )
                             },
-                            onRegisterSchoolClick = { viewModel.selectTab(MainTab.ADMIN) },
+                            onRegisterSchoolClick = {
+                                if (currentProfile?.role == "admin" || isPlatformAdmin) {
+                                    viewModel.selectTab(MainTab.ADMIN)
+                                } else {
+                                    showProfileEditor = true
+                                }
+                            },
                             activeAdverts = activeAdvertsWithDistance.filter { it.advert.status == "ACTIVE" },
                             onOpenPaidAdverts = { viewModel.selectTab(MainTab.ADVERTS) },
                             favoriteSchoolIds = favoriteSchoolIds,
@@ -375,7 +474,10 @@ private fun AuthenticatedShell(
                             onOpenAiAdvisor = { viewModel.selectTab(MainTab.AI_ADVISOR) },
                             selectedSchoolDetailState = selectedSchoolDetailState,
                             selectedSchoolAnnouncementsState = selectedSchoolAnnouncementsState,
-                            onSelectSchoolForDetail = viewModel::selectSchoolForDetail
+                            currentUserId = currentUserId,
+                            schoolVisitorCounts = schoolVisitorCounts,
+                            onSelectSchoolForDetail = viewModel::selectSchoolForDetail,
+                            searchFocusTick = discoverSearchTick
                         )
                         MainTab.DASHBOARD -> DashboardScreen(
                             displayName = currentProfile?.displayName?.ifBlank { userDisplayName } ?: userDisplayName,
@@ -385,7 +487,9 @@ private fun AuthenticatedShell(
                             savedSchoolsCount = favoriteSchoolIds.size,
                             enrollmentsState = parentEnrollmentsState,
                             conversationCount = (conversationsState as? UiState.Success)?.data?.size ?: 0,
+                            bannerImageUrl = currentProfile?.bannerImageUrl,
                             isPlatformAdmin = isPlatformAdmin,
+                            onEditProfile = { showProfileEditor = true },
                             onNavigateTab = viewModel::selectTab,
                             onRefreshOnline = {
                                 viewModel.refreshHomeFromPullDown()
@@ -398,6 +502,8 @@ private fun AuthenticatedShell(
                             favoriteSchoolIds = favoriteSchoolIds,
                             selectedSchoolDetailState = selectedSchoolDetailState,
                             selectedSchoolAnnouncementsState = selectedSchoolAnnouncementsState,
+                            currentUserId = currentUserId,
+                            schoolVisitorCounts = schoolVisitorCounts,
                             onSelectSchoolForDetail = viewModel::selectSchoolForDetail,
                             onToggleFavoriteSchool = viewModel::toggleFavoriteSchool,
                             onMessageAdmin = viewModel::openChatWithSchool,
@@ -434,6 +540,7 @@ private fun AuthenticatedShell(
                             filter = tutorFilter,
                             clientSessionsState = clientTutorSessionsState,
                             teacherSessionsState = teacherTutorSessionsState,
+                            tutorVisitorCounts = tutorVisitorCounts,
                             isBusy = isBusy,
                             onlineTutorsLoading = onlineTutorsLoading,
                             onlineTutorsError = onlineTutorsError,
@@ -442,6 +549,7 @@ private fun AuthenticatedShell(
                             onSaveTutorProfile = { tutor, isNew ->
                                 viewModel.createOrUpdateTutor(tutor, isNew)
                             },
+                            onInspectTutorPage = viewModel::recordTutorPageVisit,
                             onBookSession = { tutor, studentName, track, subject, schedule, notes, hours, draft ->
                                 viewModel.bookTutorSession(tutor, studentName, track, subject, schedule, notes, hours, draft)
                             },
@@ -496,6 +604,7 @@ private fun AuthenticatedShell(
                             adminAllPaymentsState = adminAllPaymentsState,
                             advertsState = advertsState,
                             tutorsUiState = tutorsState,
+                            schoolVisitorCounts = schoolVisitorCounts,
                             isBusy = isBusy,
                             onSaveSchool = { school, isNew ->
                                 viewModel.createOrUpdateSchool(school, isNew)
@@ -518,6 +627,7 @@ private fun AuthenticatedShell(
                             isPlatformAdmin = isPlatformAdmin,
                             isBootstrappedOwner = viewModel.isBootstrappedOwner,
                             currentUserEmail = userEmail,
+                            currentUserId = currentUserId,
                             allUsersState = adminAllUsersState,
                             schoolsState = schoolsState,
                             platformAdminsState = platformAdminsState,
@@ -528,6 +638,7 @@ private fun AuthenticatedShell(
                             isBusy = isBusy,
                             onGrantAdmin = viewModel::grantPlatformAdminAccess,
                             onRevokeAdmin = viewModel::revokePlatformAdminAccess,
+                            onDeleteUser = viewModel::deleteViolatingUser,
                             onVerifySchool = viewModel::verifyRegisteredSchoolOnInternet,
                             onRefreshSqlOverview = {
                                 viewModel.refreshPlatformAnalyticsSql()
@@ -556,6 +667,19 @@ private fun AuthenticatedShell(
                             onNavigateToSchools = { viewModel.selectTab(MainTab.DISCOVER) },
                             onNavigateToTutors = { viewModel.selectTab(MainTab.TUTORS) },
                             onBack = { viewModel.selectTab(MainTab.DISCOVER) }
+                        )
+                        MainTab.RADIO -> OnlineRadioScreen(
+                            radioState = radioPlaybackState,
+                            onTogglePlayPause = viewModel::toggleRadioPlayPause,
+                            onPause = viewModel::pauseRadio,
+                            onSkipForward = viewModel::skipRadioForward,
+                            onSkipBackward = viewModel::skipRadioBackward,
+                            onSelectStation = viewModel::selectRadioStation,
+                            onAddCustomStation = viewModel::addAndPlayCustomRadioStation,
+                            onBack = { viewModel.selectTab(MainTab.HOME) }
+                        )
+                        MainTab.GAMES -> EducationalGamesScreen(
+                            onBack = { viewModel.selectTab(MainTab.HOME) }
                         )
                         MainTab.AI_ADVISOR -> AiAdvisorScreen(
                             messages = aiChatMessages,
@@ -614,4 +738,134 @@ private fun AuthenticatedShell(
             onDismiss = viewModel::clearLatestPaymentReceipt
         )
     }
+
+    if (showNotificationsDialog) {
+        NotificationsAlertDialog(
+            notifications = visibleNotifications,
+            onDismissNotification = viewModel::dismissNotification,
+            onClearAll = viewModel::clearAllNotifications,
+            onOpenPortal = {
+                showNotificationsDialog = false
+                viewModel.selectTab(MainTab.PORTAL)
+            },
+            onClose = { showNotificationsDialog = false }
+        )
+    }
+}
+
+@Composable
+fun NotificationsAlertDialog(
+    notifications: List<Announcement>,
+    onDismissNotification: (String) -> Unit,
+    onClearAll: () -> Unit,
+    onOpenPortal: () -> Unit,
+    onClose: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        modifier = Modifier.testTag("notifications_dialog"),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Updates & Announcements",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (notifications.isNotEmpty()) {
+                    TextButton(
+                        onClick = onClearAll,
+                        modifier = Modifier.testTag("clear_notifications_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.DeleteSweep,
+                            contentDescription = "Clear all notifications",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text("Clear All")
+                    }
+                }
+            }
+        },
+        text = {
+            if (notifications.isEmpty()) {
+                Text(
+                    text = "No unread notifications. Updates from schools and admissions teams appear here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("notifications_empty_text")
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(notifications.take(15), key = { it.id }) { ann ->
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("notification_item_${ann.id}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 4.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "${ann.schoolName} • ${ann.category}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = ann.title,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = ann.body,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onDismissNotification(ann.id) },
+                                    modifier = Modifier
+                                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                        .testTag("dismiss_notification_${ann.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = "Clear notification",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenPortal) {
+                Text("Open Portal")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onClose) {
+                Text("Close")
+            }
+        }
+    )
 }

@@ -2,8 +2,10 @@ package com.example
 
 import android.content.Context
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertContentDescriptionContains
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -13,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.test.core.app.ApplicationProvider
@@ -634,12 +637,13 @@ class ExampleRobolectricTest {
                     defaultName = "Quam Elebute",
                     defaultEmail = SchoolConstants.PLATFORM_ADMIN_EMAIL,
                     isBusy = false,
-                    onSaveProfile = { _, _, _, _, _, _, _, _ -> }
+                    onSaveProfile = { _, _, _, _, _, _, _, _, _ -> }
                 )
             }
         }
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Complete Your Registration").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("profile_banner_pick_photo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("save_registration_button").performScrollTo().assertIsDisplayed()
     }
 
@@ -1294,5 +1298,1131 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("nav_platform_admin").performScrollTo().assertIsDisplayed()
     }
-}
 
+    @Test
+    fun `home bottom bar displays Home first followed by Discover, SkolQuik AI, Saved, and Search keys`() {
+        val activeTabState = androidx.compose.runtime.mutableStateOf(com.example.ui.MainTab.HOME)
+        val searchModeState = androidx.compose.runtime.mutableStateOf(false)
+        var searchClickCount = 0
+        var notificationsClickCount = 0
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = activeTabState.value,
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    userRole = "parent",
+                    isPlatformAdmin = false,
+                    favoriteCount = 3,
+                    snackbarHostState = snackbarHostState,
+                    isSearchActive = searchModeState.value,
+                    onSearchClick = {
+                        searchClickCount++
+                        searchModeState.value = true
+                        activeTabState.value = com.example.ui.MainTab.DISCOVER
+                    },
+                    notificationCount = 4,
+                    onNotificationsClick = { notificationsClickCount++ },
+                    onSelectTab = { tab ->
+                        searchModeState.value = false
+                        activeTabState.value = tab
+                    },
+                    onOpenProfile = {},
+                    onSignOut = {}
+                ) {
+                    androidx.compose.material3.Text("Body")
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_bottom_bar").assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("open_ai_advisor_button")).fetchSemanticsNodes().isEmpty())
+        composeTestRule.onNodeWithTag("top_bar_notifications_button").assertIsDisplayed().performClick()
+        assertEquals(1, notificationsClickCount)
+        composeTestRule.onNodeWithTag("top_bar_search_button").assertIsDisplayed()
+
+        val homeBounds = composeTestRule.onNodeWithTag("bottom_nav_home")
+            .assertIsDisplayed()
+            .assertTextContains("Home")
+            .fetchSemanticsNode().boundsInRoot
+        val discoverBounds = composeTestRule.onNodeWithTag("bottom_nav_discover")
+            .assertIsDisplayed()
+            .assertTextContains("Discover")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(homeBounds.left < discoverBounds.left)
+
+        composeTestRule.onNodeWithTag("bottom_nav_ai").assertIsDisplayed().assertTextContains("SkolQuik AI")
+        composeTestRule.onNodeWithTag("bottom_nav_saved").assertIsDisplayed().assertTextContains("Saved")
+        composeTestRule.onNodeWithTag("bottom_nav_search").assertIsDisplayed().assertTextContains("Search")
+
+        composeTestRule.onNodeWithTag("bottom_nav_discover").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.DISCOVER, activeTabState.value)
+
+        composeTestRule.onNodeWithTag("bottom_nav_ai").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.AI_ADVISOR, activeTabState.value)
+
+        composeTestRule.onNodeWithTag("bottom_nav_saved").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.SAVED, activeTabState.value)
+
+        composeTestRule.onNodeWithTag("bottom_nav_search").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, searchClickCount)
+        assertEquals(com.example.ui.MainTab.DISCOVER, activeTabState.value)
+        assertTrue(searchModeState.value)
+
+        composeTestRule.onNodeWithTag("bottom_nav_home").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.HOME, activeTabState.value)
+        assertTrue(!searchModeState.value)
+    }
+
+    @Test
+    fun `home adverts screen showcases adverts for both schools and progressive tutors`() {
+        val sampleAdverts = listOf(
+            com.example.data.AdvertWithDistance(
+                advert = com.example.data.Advert(
+                    id = "ad_school_1",
+                    advertiserName = "Crestview Academy",
+                    title = "2026 STEM Scholarship Admissions",
+                    body = "Apply now for Junior & Senior Secondary entrance exams.",
+                    category = "School Admissions",
+                    targetLocation = "Lekki Phase 1, Lagos",
+                    ctaLabel = "Apply Now",
+                    status = "ACTIVE"
+                ),
+                distanceKm = 1.4
+            ),
+            com.example.data.AdvertWithDistance(
+                advert = com.example.data.Advert(
+                    id = "ad_tutor_1",
+                    advertiserName = "The Progressive Tutors",
+                    title = "IGCSE & WAEC Intensive Coaching",
+                    body = "1-on-1 online & in-person Mathematics and Physics sessions.",
+                    category = "Progressive Tutors",
+                    targetLocation = "Victoria Island, Lagos",
+                    ctaLabel = "Book Tutor",
+                    status = "ACTIVE"
+                ),
+                distanceKm = 2.8
+            )
+        )
+        val sampleSchools = listOf(
+            SchoolWithDistance(
+                school = School(
+                    id = "sch_home_1",
+                    name = "Horizon British School",
+                    curriculum = "British",
+                    address = "Ikoyi, Lagos",
+                    admissionsOpen = true
+                ),
+                distanceKm = 2.1
+            )
+        )
+        val sampleTutors = listOf(
+            com.example.data.TutorWithDistance(
+                tutor = com.example.data.ProgressiveTutor(
+                    id = "tut_home_1",
+                    fullName = "Chinedu Okafor",
+                    headline = "Cambridge Physics & Further Maths Mentor",
+                    hourlyRate = 8000L,
+                    locationLabel = "Ikeja GRA, Lagos"
+                ),
+                distanceKm = 3.5
+            )
+        )
+
+        var discoverOpened = false
+        var tutorsOpened = false
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.HomeAdvertsScreen(
+                    activeAdverts = sampleAdverts,
+                    schools = sampleSchools,
+                    tutors = sampleTutors,
+                    isLoading = false,
+                    isRefreshing = false,
+                    isBusy = false,
+                    defaultUserName = "Amina Bello",
+                    defaultUserEmail = "amina@example.com",
+                    onRefreshHome = {},
+                    onOpenDiscover = { discoverOpened = true },
+                    onOpenTutors = { tutorsOpened = true },
+                    onOpenPaidAdverts = {},
+                    onSendAdvertInquiry = { _, _, _, _, _, _ -> }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_adverts_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_filter_pills").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_spotlight_grid").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2026 STEM Scholarship Admissions", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("IGCSE & WAEC Intensive Coaching", substring = true).assertIsDisplayed()
+
+        // Filter to Progressive Tutors only
+        composeTestRule.onNodeWithTag("home_pill_progressive_tutors").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(
+            composeTestRule.onAllNodesWithText("2026 STEM Scholarship Admissions", substring = true)
+                .fetchSemanticsNodes().isEmpty()
+        )
+        composeTestRule.onNodeWithText("IGCSE & WAEC Intensive Coaching", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Chinedu Okafor", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `dashboard screen displays user display banner and edit picture button`() {
+        var editProfileTriggered = false
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.DashboardScreen(
+                    displayName = "Amina Bello",
+                    userRole = "parent",
+                    filter = com.example.data.SchoolSearchFilter(),
+                    nearbySchools = emptyList(),
+                    savedSchoolsCount = 2,
+                    enrollmentsState = UiState.Success(emptyList()),
+                    conversationCount = 1,
+                    bannerImageUrl = "https://example.com/user-banner.jpg",
+                    onEditProfile = { editProfileTriggered = true },
+                    onNavigateTab = {},
+                    onRefreshOnline = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("dashboard_user_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("dashboard_edit_banner_button").assertIsDisplayed().performClick()
+        assertTrue(editProfileTriggered)
+    }
+
+    @Test
+    fun `school editor, advert editor, and tutor editor expose banner picture picker and URL controls`() {
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.BannerImageEditorSection(
+                    bannerImageUrl = null,
+                    fallbackResId = R.drawable.img_campus_hero,
+                    testTagPrefix = "test_banner",
+                    onBannerChanged = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("test_banner_preview").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("test_banner_pick_photo_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("test_banner_toggle_url_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("test_banner_url_input").assertIsDisplayed()
+    }
+
+    @Test
+    fun `registered school admins see visitor counts in admin hub and owned school detail view`() {
+        val ownedSchool = School(
+            id = "sch_owned_1",
+            adminUid = "admin_uid_1",
+            adminName = "Dr. Bello",
+            name = "Lagoon Crest Academy",
+            address = "Lekki Phase 1, Lagos",
+            curriculum = "Nigerian & British",
+            bannerImageUrl = "https://example.com/lagoon-banner.jpg"
+        )
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.AdminHubScreen(
+                    currentUserId = "admin_uid_1",
+                    adminName = "Dr. Bello",
+                    defaultLat = 6.4474,
+                    defaultLng = 3.4737,
+                    isPlatformAdmin = false,
+                    schoolsState = UiState.Success(listOf(ownedSchool)),
+                    adminEnrollmentsState = UiState.Success(emptyList()),
+                    adminStudentsState = UiState.Success(emptyList()),
+                    selectedAdminStudentId = null,
+                    adminAttendanceState = UiState.Success(emptyList()),
+                    adminGradesState = UiState.Success(emptyList()),
+                    schoolVisitorCounts = mapOf("sch_owned_1" to 4),
+                    isBusy = false,
+                    onSaveSchool = { _, _ -> },
+                    onUpdateEnrollmentStatus = { _, _, _ -> },
+                    onSelectAdminStudent = {},
+                    onLogAttendance = { _, _, _, _ -> },
+                    onAddGrade = { _, _, _, _, _ -> },
+                    onPublishAnnouncement = { _, _, _, _, _ -> }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("admin_total_school_visits").assertIsDisplayed()
+        composeTestRule.onNode(
+            androidx.compose.ui.test.hasAnyAncestor(hasTestTag("admin_total_school_visits")) and
+                androidx.compose.ui.test.hasText("4 people visited your page", substring = true),
+            useUnmergedTree = true
+        ).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("school_card_banner_sch_owned_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("school_visits_badge_sch_owned_1")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeTestRule.onNode(
+            androidx.compose.ui.test.hasAnyAncestor(hasTestTag("school_visits_badge_sch_owned_1")) and
+                androidx.compose.ui.test.hasText("4 people visited your page", substring = true),
+            useUnmergedTree = true
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun `school detail view shows visitor badge only to owning school admin`() {
+        val school = School(
+            id = "sch_detail_visits",
+            adminUid = "owner_1",
+            adminName = "Principal",
+            name = "Horizon British College",
+            address = "Ikoyi, Lagos",
+            bannerImageUrl = "https://example.com/horizon.jpg"
+        )
+        val isOwnerState = androidx.compose.runtime.mutableStateOf(false)
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                SchoolDetailView(
+                    fallbackSchoolItem = SchoolWithDistance(school, 1.2),
+                    firestoreDetailState = UiState.Success(school),
+                    isOwnedByCurrentUser = isOwnerState.value,
+                    pageVisitorCount = 1,
+                    onMessageAdmin = {},
+                    onSubmitEnrollment = { _, _, _, _, _ -> }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("school_detail_banner").assertIsDisplayed()
+        assertTrue(
+            composeTestRule.onAllNodes(hasTestTag("school_detail_visits_badge"))
+                .fetchSemanticsNodes().isEmpty()
+        )
+
+        isOwnerState.value = true
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("school_detail_visits_badge").assertIsDisplayed()
+        composeTestRule.onNode(
+            androidx.compose.ui.test.hasAnyAncestor(hasTestTag("school_detail_visits_badge")) and
+                androidx.compose.ui.test.hasText("1 person visited your page", substring = true),
+            useUnmergedTree = true
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun `progressive tutors screen shows visitor summary and card badge for registered tutors`() {
+        val ownedTutor = com.example.data.ProgressiveTutor(
+            id = "tut_owned_1",
+            teacherUid = "tutor_owner_uid",
+            fullName = "Mrs. Ada Obi",
+            headline = "Cambridge & WAEC Chemistry Tutor",
+            hourlyRate = 9000L,
+            locationLabel = "Victoria Island, Lagos",
+            bannerImageUrl = "https://example.com/ada-banner.jpg"
+        )
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.ProgressiveTutorsScreen(
+                    currentUserId = "tutor_owner_uid",
+                    defaultTeacherName = "Mrs. Ada Obi",
+                    tutorsUiState = UiState.Success(listOf(ownedTutor)),
+                    filteredTutors = listOf(com.example.data.TutorWithDistance(ownedTutor, 1.0)),
+                    filter = com.example.data.TutorSearchFilter(),
+                    clientSessionsState = UiState.Success(emptyList()),
+                    teacherSessionsState = UiState.Success(emptyList()),
+                    tutorVisitorCounts = mapOf("tut_owned_1" to 7),
+                    isBusy = false,
+                    onUpdateFilter = {},
+                    onResetFilters = {},
+                    onSaveTutorProfile = { _, _ -> },
+                    onBookSession = { _, _, _, _, _, _, _, _ -> },
+                    onUpdateSessionStatus = { _, _, _ -> }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("tutor_owner_visits_summary").assertIsDisplayed()
+        composeTestRule.onNode(
+            androidx.compose.ui.test.hasAnyAncestor(hasTestTag("tutor_owner_visits_summary")) and
+                androidx.compose.ui.test.hasText("7 people visited your page", substring = true),
+            useUnmergedTree = true
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun `buildHomeAdvertFeed preserves bannerImageUrl for adverts, schools, and tutors`() {
+        val adWithBanner = com.example.data.AdvertWithDistance(
+            advert = com.example.data.Advert(
+                id = "ad_banner_1",
+                advertiserName = "Crestview Academy",
+                title = "Open Admissions",
+                body = "Join our STEM showcase",
+                category = "School Admissions",
+                bannerImageUrl = "https://example.com/ad-banner.jpg"
+            ),
+            distanceKm = 1.0
+        )
+        val schoolWithBanner = SchoolWithDistance(
+            school = School(
+                id = "sch_banner_1",
+                name = "Royal Oaks School",
+                curriculum = "British",
+                address = "Lekki, Lagos",
+                bannerImageUrl = "https://example.com/school-banner.jpg"
+            ),
+            distanceKm = 2.0
+        )
+        val tutorWithBanner = com.example.data.TutorWithDistance(
+            tutor = com.example.data.ProgressiveTutor(
+                id = "tut_banner_1",
+                fullName = "Mr. Tunde Balogun",
+                headline = "IGCSE Maths",
+                bannerImageUrl = "https://example.com/tutor-banner.jpg"
+            ),
+            distanceKm = 3.0
+        )
+
+        val feed = com.example.ui.buildHomeAdvertFeed(
+            activeAdverts = listOf(adWithBanner),
+            schools = listOf(schoolWithBanner),
+            tutors = listOf(tutorWithBanner),
+            selectedCategory = "All"
+        )
+
+        assertEquals(
+            "https://example.com/ad-banner.jpg",
+            feed.first { it.id == "ad_ad_banner_1" }.bannerImageUrl
+        )
+        assertEquals(
+            "https://example.com/school-banner.jpg",
+            feed.first { it.id == "school_sch_banner_1" }.bannerImageUrl
+        )
+        assertEquals(
+            "https://example.com/tutor-banner.jpg",
+            feed.first { it.id == "tutor_tut_banner_1" }.bannerImageUrl
+        )
+    }
+
+    @Test
+    fun `homeWidgetsService parses Pixel Weather JSON and Google News RSS XML for Education, Science Tech, Innovation`() {
+        val weatherJson = """
+            {
+              "current": {
+                "temperature_2m": 29.4,
+                "apparent_temperature": 32.1,
+                "weather_code": 0,
+                "is_day": 1,
+                "wind_speed_10m": 14.6,
+                "relative_humidity_2m": 72
+              },
+              "daily": {
+                "time": ["2026-11-27", "2026-11-28", "2026-11-29"],
+                "temperature_2m_max": [31.2, 30.8, 29.9],
+                "temperature_2m_min": [24.1, 23.7, 23.4],
+                "weather_code": [0, 2, 61]
+              }
+            }
+        """.trimIndent()
+
+        val weather = com.example.data.HomeWidgetsService.parseOpenMeteoWeatherJson(
+            jsonBody = weatherJson,
+            locationLabel = "Lekki Phase 1, Lagos",
+            latitude = 6.4474,
+            longitude = 3.4737
+        )
+        assertEquals("Lekki Phase 1, Lagos", weather.locationLabel)
+        assertEquals(29, weather.temperatureC)
+        assertEquals(32, weather.apparentTempC)
+        assertEquals(31, weather.highTempC)
+        assertEquals(24, weather.lowTempC)
+        assertEquals(72, weather.humidityPct)
+        assertEquals(15, weather.windKmh)
+        assertEquals("Sunny", weather.conditionLabel)
+        assertEquals(3, weather.dailyForecast.size)
+        assertEquals("Today", weather.dailyForecast.first().dayLabel)
+
+        val educationRss = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <item>
+                  <title>Global STEM Scholarship Portal Opens - EdTech Times</title>
+                  <link>https://example.org/news/stem-scholarship</link>
+                  <pubDate>Fri, 27 Nov 2026 08:00:00 GMT</pubDate>
+                  <source>EdTech Times</source>
+                </item>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val sciTechRss = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <item>
+                  <title>Quantum Battery Prototype Hits Lab Milestone - Science Daily</title>
+                  <link>https://example.org/news/quantum-battery</link>
+                  <pubDate>Fri, 27 Nov 2026 07:30:00 GMT</pubDate>
+                  <source>Science Daily</source>
+                </item>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val innovationRss = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <item>
+                  <title>Adaptive Classroom Robotics Expands Across Africa - Innovation Weekly</title>
+                  <link>https://example.org/news/classroom-robotics</link>
+                  <pubDate>Fri, 27 Nov 2026 06:15:00 GMT</pubDate>
+                  <source>Innovation Weekly</source>
+                </item>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val eduArticles = com.example.data.HomeWidgetsService.parseGoogleNewsRssXml(
+            educationRss,
+            com.example.data.GoogleNewsTopic.EDUCATION
+        )
+        val sciArticles = com.example.data.HomeWidgetsService.parseGoogleNewsRssXml(
+            sciTechRss,
+            com.example.data.GoogleNewsTopic.SCIENCE_TECH
+        )
+        val innoArticles = com.example.data.HomeWidgetsService.parseGoogleNewsRssXml(
+            innovationRss,
+            com.example.data.GoogleNewsTopic.INNOVATION
+        )
+
+        assertEquals(1, eduArticles.size)
+        assertEquals("Global STEM Scholarship Portal Opens", eduArticles.first().title)
+        assertEquals("EdTech Times", eduArticles.first().source)
+        assertEquals(com.example.data.GoogleNewsTopic.EDUCATION, eduArticles.first().topic)
+
+        assertEquals(1, sciArticles.size)
+        assertEquals(com.example.data.GoogleNewsTopic.SCIENCE_TECH, sciArticles.first().topic)
+
+        assertEquals(1, innoArticles.size)
+        assertEquals(com.example.data.GoogleNewsTopic.INNOVATION, innoArticles.first().topic)
+    }
+
+    @Test
+    fun `home adverts screen renders Pixel Weather widget and Google News topics`() {
+        val sampleWeather = com.example.data.PixelWeatherSnapshot(
+            locationLabel = "Victoria Island, Lagos",
+            latitude = 6.4281,
+            longitude = 3.4219,
+            temperatureC = 28,
+            apparentTempC = 30,
+            highTempC = 31,
+            lowTempC = 24,
+            humidityPct = 68,
+            windKmh = 12,
+            weatherCode = 2,
+            isDay = true,
+            conditionLabel = "Partly Cloudy",
+            dailyForecast = listOf(
+                com.example.data.DailyForecastItem("Today", 2, 24, 31),
+                com.example.data.DailyForecastItem("Sat", 0, 25, 32),
+                com.example.data.DailyForecastItem("Sun", 61, 23, 29)
+            )
+        )
+        val sampleArticles = listOf(
+            com.example.data.GoogleNewsArticle(
+                id = "n_edu",
+                title = "Cambridge & WAEC Digital Mock Prep Launches",
+                source = "Education Desk",
+                publishedAt = "1h ago",
+                url = "https://news.google.com/edu",
+                topic = com.example.data.GoogleNewsTopic.EDUCATION
+            ),
+            com.example.data.GoogleNewsArticle(
+                id = "n_sci",
+                title = "Next-Gen Solar Microgrids Power Rural Campuses",
+                source = "Science & Tech Monitor",
+                publishedAt = "2h ago",
+                url = "https://news.google.com/scitech",
+                topic = com.example.data.GoogleNewsTopic.SCIENCE_TECH
+            ),
+            com.example.data.GoogleNewsArticle(
+                id = "n_inno",
+                title = "Student Innovation Challenge Awards Robotics Grants",
+                source = "Tech Innovators",
+                publishedAt = "3h ago",
+                url = "https://news.google.com/innovation",
+                topic = com.example.data.GoogleNewsTopic.INNOVATION
+            )
+        )
+        val selectedTopicState = androidx.compose.runtime.mutableStateOf<com.example.data.GoogleNewsTopic?>(null)
+        var refreshWeatherClicked = false
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.HomeAdvertsScreen(
+                    activeAdverts = emptyList(),
+                    schools = emptyList(),
+                    tutors = emptyList(),
+                    isLoading = false,
+                    isRefreshing = false,
+                    isBusy = false,
+                    defaultUserName = "Amina Bello",
+                    defaultUserEmail = "amina@example.com",
+                    onRefreshHome = {},
+                    onOpenDiscover = {},
+                    onOpenTutors = {},
+                    onOpenPaidAdverts = {},
+                    onSendAdvertInquiry = { _, _, _, _, _, _ -> },
+                    weatherState = UiState.Success(sampleWeather),
+                    locationLabel = "Victoria Island, Lagos",
+                    googleNewsState = UiState.Success(sampleArticles),
+                    selectedNewsTopic = selectedTopicState.value,
+                    onSelectNewsTopic = { selectedTopicState.value = it },
+                    onRefreshWeather = { refreshWeatherClicked = true }
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("pixel_weather_widget").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pixel_weather_location").assertTextContains("Victoria Island, Lagos")
+        composeTestRule.onNodeWithTag("pixel_weather_temp").assertTextContains("28°")
+        composeTestRule.onNodeWithTag("pixel_weather_gps_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pixel_weather_refresh_button").performClick()
+        assertTrue(refreshWeatherClicked)
+
+        composeTestRule.onNodeWithTag("home_feed_list").performScrollToNode(hasTestTag("google_news_section"))
+        composeTestRule.onNodeWithTag("google_news_section").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("news_topic_education").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.data.GoogleNewsTopic.EDUCATION, selectedTopicState.value)
+        composeTestRule.onNodeWithTag("google_news_card_n_edu").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("news_topic_science_tech").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.data.GoogleNewsTopic.SCIENCE_TECH, selectedTopicState.value)
+        composeTestRule.onNodeWithTag("google_news_card_n_sci").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("news_topic_innovation").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.data.GoogleNewsTopic.INNOVATION, selectedTopicState.value)
+        composeTestRule.onNodeWithTag("google_news_card_n_inno").assertIsDisplayed()
+    }
+
+    @Test
+    fun `radio controller and online radio screen handle skip forward, skip backward, and pause`() {
+        val controller = com.example.radio.RadioPlaybackController(enableAudioHardware = false)
+        assertEquals(com.example.radio.RadioStatus.IDLE, controller.state.value.status)
+        assertEquals(0, controller.state.value.currentIndex)
+
+        controller.togglePlayPause()
+        assertEquals(com.example.radio.RadioStatus.PLAYING, controller.state.value.status)
+
+        controller.skipForward()
+        assertEquals(1, controller.state.value.currentIndex)
+        assertEquals(com.example.radio.RadioStatus.PLAYING, controller.state.value.status)
+
+        controller.pause()
+        assertEquals(com.example.radio.RadioStatus.PAUSED, controller.state.value.status)
+
+        controller.skipBackward()
+        assertEquals(0, controller.state.value.currentIndex)
+
+        controller.skipBackward()
+        assertEquals(com.example.radio.DefaultRadioStations.lastIndex, controller.state.value.currentIndex)
+
+        composeTestRule.setContent {
+            val state = controller.state.collectAsState()
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.OnlineRadioScreen(
+                    radioState = state.value,
+                    onTogglePlayPause = controller::togglePlayPause,
+                    onPause = controller::pause,
+                    onSkipForward = controller::skipForward,
+                    onSkipBackward = controller::skipBackward,
+                    onSelectStation = controller::selectAndPlay,
+                    onAddCustomStation = controller::addAndPlayCustomStation,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("online_radio_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("radio_skip_forward_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(0, controller.state.value.currentIndex)
+
+        composeTestRule.onNodeWithTag("radio_skip_forward_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, controller.state.value.currentIndex)
+        composeTestRule.onNodeWithTag("radio_current_station_title")
+            .assertTextContains(com.example.radio.DefaultRadioStations[1].name)
+
+        composeTestRule.onNodeWithTag("radio_skip_backward_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(0, controller.state.value.currentIndex)
+
+        composeTestRule.onNodeWithTag("radio_explicit_pause_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.radio.RadioStatus.PAUSED, controller.state.value.status)
+        composeTestRule.onNodeWithTag("radio_status_label").assertTextContains("PAUSED")
+    }
+
+    @Test
+    fun `sidebar contains Online Radio and Emergency Call 112 phone link`() {
+        val selectedTab = androidx.compose.runtime.mutableStateOf(com.example.ui.MainTab.HOME)
+        var emergencyDialTriggered = false
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = selectedTab.value,
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    userRole = "parent",
+                    isPlatformAdmin = false,
+                    favoriteCount = 0,
+                    snackbarHostState = snackbarHostState,
+                    onSelectTab = { selectedTab.value = it },
+                    onOpenProfile = {},
+                    onSignOut = {},
+                    onEmergencyCall = { emergencyDialTriggered = true }
+                ) {
+                    androidx.compose.material3.Text("Home Body")
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_sidebar_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("nav_radio").performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.RADIO, selectedTab.value)
+
+        composeTestRule.onNodeWithTag("open_sidebar_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("sidebar_emergency_call_112")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(emergencyDialTriggered)
+    }
+
+    @Test
+    fun `sidebar displays Educational Games entry and EducationalGamesScreen renders Compare Numbers and Fractions sims`() {
+        val allGames = com.example.ui.EducationalGameCatalog.games
+        assertEquals(3, allGames.size)
+        val compareNumbers = allGames.filter { it.category == com.example.ui.GameCategory.COMPARE_NUMBERS }
+        val fractions = allGames.filter { it.category == com.example.ui.GameCategory.FRACTIONS }
+        assertEquals(1, compareNumbers.size)
+        assertEquals(
+            "https://phet.colorado.edu/sims/html/number-compare/latest/number-compare_en.html",
+            compareNumbers.first().simUrl
+        )
+        assertEquals(2, fractions.size)
+        assertEquals(
+            "https://phet.colorado.edu/sims/html/fractions-intro/latest/fractions-intro_en.html",
+            fractions[0].simUrl
+        )
+        assertEquals(
+            "https://phet.colorado.edu/sims/html/fractions-mixed-numbers/latest/fractions-mixed-numbers_en.html",
+            fractions[1].simUrl
+        )
+
+        val selectedTab = androidx.compose.runtime.mutableStateOf(com.example.ui.MainTab.HOME)
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = selectedTab.value,
+                    displayName = "Amina Bello",
+                    userEmail = "amina@example.com",
+                    userRole = "parent",
+                    isPlatformAdmin = false,
+                    favoriteCount = 0,
+                    snackbarHostState = snackbarHostState,
+                    onSelectTab = { selectedTab.value = it },
+                    onOpenProfile = {},
+                    onSignOut = {}
+                ) {
+                    if (selectedTab.value == com.example.ui.MainTab.GAMES) {
+                        com.example.ui.EducationalGamesScreen(
+                            onBack = { selectedTab.value = com.example.ui.MainTab.HOME },
+                            enableEmbeddedWebView = false
+                        )
+                    } else {
+                        androidx.compose.material3.Text("Home Body")
+                    }
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_sidebar_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("nav_games")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains("Educational Games", substring = true)
+            .performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(com.example.ui.MainTab.GAMES, selectedTab.value)
+
+        composeTestRule.onNodeWithTag("educational_games_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("game_category_compare_numbers").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("game_category_fractions").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_card_fractions_intro"))
+        composeTestRule.onNodeWithTag("game_card_fractions_intro").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_card_fractions_mixed_numbers"))
+        composeTestRule.onNodeWithTag("game_card_fractions_mixed_numbers").assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_stage_card"))
+        composeTestRule.onNodeWithTag("game_active_title").assertTextContains("Fractions: Mixed Numbers")
+        composeTestRule.onNodeWithTag("game_fullscreen_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("game_fullscreen_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("game_exit_fullscreen_button").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_category_compare_numbers"))
+        composeTestRule.onNodeWithTag("game_category_compare_numbers").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_card_number_compare"))
+        composeTestRule.onNodeWithTag("game_card_number_compare").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("educational_games_screen")
+            .performScrollToNode(hasTestTag("game_stage_card"))
+        composeTestRule.onNodeWithTag("game_active_title").assertTextContains("Compare Numbers")
+    }
+
+    @Test
+    fun `worldwide reverse geocoder formats global GPS locations into human readable place words`() {
+        val lagosJson = """
+            {
+              "lat": "6.4474",
+              "lon": "3.4737",
+              "address": {
+                "suburb": "Lekki Phase 1",
+                "city": "Lagos",
+                "state": "Lagos State",
+                "country": "Nigeria"
+              }
+            }
+        """.trimIndent()
+        val londonJson = """
+            {
+              "lat": "51.5074",
+              "lon": "-0.1278",
+              "address": {
+                "neighbourhood": "Westminster",
+                "city": "London",
+                "country": "United Kingdom"
+              }
+            }
+        """.trimIndent()
+        val tokyoJson = """
+            {
+              "lat": "35.6595",
+              "lon": "139.7004",
+              "address": {
+                "city_district": "Shibuya",
+                "city": "Tokyo",
+                "country": "Japan"
+              }
+            }
+        """.trimIndent()
+
+        val lagos = com.example.data.GoogleMapsPlatformService.parseNominatimReverseGeocodingJson(lagosJson)
+        val london = com.example.data.GoogleMapsPlatformService.parseNominatimReverseGeocodingJson(londonJson)
+        val tokyo = com.example.data.GoogleMapsPlatformService.parseNominatimReverseGeocodingJson(tokyoJson)
+
+        assertEquals("Lekki Phase 1, Lagos, Lagos State", lagos?.formattedAddress)
+        assertEquals("Westminster, London, United Kingdom", london?.formattedAddress)
+        assertEquals("Shibuya, Tokyo, Japan", tokyo?.formattedAddress)
+    }
+
+    @Test
+    fun `nigeria news topic parses Nigerian RSS feeds and infers Channels TV, Premium Times, and Punch publishers`() {
+        val nigeriaRss = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+              <channel>
+                <item>
+                  <title>FG Expands STEM Laboratories Across Federal Unity Colleges</title>
+                  <link>https://www.channelstv.com/2026/11/27/stem-labs/</link>
+                  <pubDate>Fri, 27 Nov 2026 09:00:00 GMT</pubDate>
+                </item>
+                <item>
+                  <title>WAEC Announces Digital CBT Pilot in Lagos and Abuja - Premium Times</title>
+                  <link>https://www.premiumtimesng.com/news/waec-cbt-pilot</link>
+                  <pubDate>Fri, 27 Nov 2026 08:30:00 GMT</pubDate>
+                  <source>Premium Times</source>
+                </item>
+                <item>
+                  <title>National Innovation Hub Opens Youth Robotics Grants</title>
+                  <link>https://punchng.com/innovation-youth-robotics/</link>
+                  <pubDate>Fri, 27 Nov 2026 07:45:00 GMT</pubDate>
+                </item>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val parsed = com.example.data.HomeWidgetsService.parseGoogleNewsRssXml(
+            xml = nigeriaRss,
+            topic = com.example.data.GoogleNewsTopic.NIGERIA
+        )
+        assertEquals(3, parsed.size)
+        assertEquals("Channels TV", parsed[0].source)
+        assertEquals("Premium Times", parsed[1].source)
+        assertEquals("The Punch", parsed[2].source)
+        assertEquals(com.example.data.GoogleNewsTopic.NIGERIA, parsed[0].topic)
+    }
+
+    @Test
+    fun `online radio screen filters Nigeria stations and preserves playback controls`() {
+        val nigeriaStations = com.example.radio.DefaultRadioStations.filter { it.country == "Nigeria" }
+        assertTrue(nigeriaStations.any { it.name.contains("Nigeria Info") })
+        assertTrue(nigeriaStations.any { it.name.contains("Cool FM") })
+        assertTrue(nigeriaStations.any { it.name.contains("Wazobia FM") })
+
+        val controller = com.example.radio.RadioPlaybackController(enableAudioHardware = false)
+        composeTestRule.setContent {
+            val state = controller.state.collectAsState()
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.OnlineRadioScreen(
+                    radioState = state.value,
+                    onTogglePlayPause = controller::togglePlayPause,
+                    onPause = controller::pause,
+                    onSkipForward = controller::skipForward,
+                    onSkipBackward = controller::skipBackward,
+                    onSelectStation = controller::selectAndPlay,
+                    onAddCustomStation = controller::addAndPlayCustomStation,
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("online_radio_screen")
+            .performScrollToNode(hasTestTag("radio_filter_nigeria"))
+        composeTestRule.onNodeWithTag("radio_filter_nigeria").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("online_radio_screen")
+            .performScrollToNode(hasTestTag("radio_station_ng_info_993"))
+        composeTestRule.onNodeWithTag("radio_station_ng_info_993").assertIsDisplayed()
+        assertTrue(
+            composeTestRule.onAllNodes(hasTestTag("radio_station_somafm_groovesalad"))
+                .fetchSemanticsNodes().isEmpty()
+        )
+    }
+
+    @Test
+    fun `sidebar hides School Admin from Individuals and hides Platform Admin from non-admins`() {
+        val roleState = androidx.compose.runtime.mutableStateOf("parent")
+        val isAdminState = androidx.compose.runtime.mutableStateOf(false)
+        val snackbarHostState = androidx.compose.material3.SnackbarHostState()
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.SkolquikMinimalShell(
+                    selectedTab = com.example.ui.MainTab.HOME,
+                    displayName = "Tunde Individual",
+                    userEmail = "tunde@example.com",
+                    userRole = roleState.value,
+                    isPlatformAdmin = isAdminState.value,
+                    favoriteCount = 0,
+                    snackbarHostState = snackbarHostState,
+                    onSelectTab = {},
+                    onOpenProfile = {},
+                    onSignOut = {}
+                ) {
+                    androidx.compose.material3.Text("Body")
+                }
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_sidebar_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("nav_admin")).fetchSemanticsNodes().isEmpty())
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("nav_platform_admin")).fetchSemanticsNodes().isEmpty())
+
+        roleState.value = "admin"
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("nav_admin").performScrollTo().assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("nav_platform_admin")).fetchSemanticsNodes().isEmpty())
+
+        isAdminState.value = true
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("nav_platform_admin").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `notifications dialog supports dismissing individual items and clearing all notifications`() {
+        val items = androidx.compose.runtime.mutableStateOf(
+            listOf(
+                com.example.data.Announcement(
+                    id = "ann_1",
+                    schoolName = "Crestview Academy",
+                    title = "Open Day Saturday",
+                    body = "Campus tours start at 10am.",
+                    category = "Events"
+                ),
+                com.example.data.Announcement(
+                    id = "ann_2",
+                    schoolName = "Lagoon High",
+                    title = "Scholarship Exam",
+                    body = "Registration closes Friday.",
+                    category = "Admissions"
+                )
+            )
+        )
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                NotificationsAlertDialog(
+                    notifications = items.value,
+                    onDismissNotification = { id -> items.value = items.value.filterNot { it.id == id } },
+                    onClearAll = { items.value = emptyList() },
+                    onOpenPortal = {},
+                    onClose = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("notification_item_ann_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("notification_item_ann_2").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("dismiss_notification_ann_1").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(composeTestRule.onAllNodes(hasTestTag("notification_item_ann_1")).fetchSemanticsNodes().isEmpty())
+        composeTestRule.onNodeWithTag("notification_item_ann_2").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("clear_notifications_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("notifications_empty_text").assertIsDisplayed()
+    }
+
+    @Test
+    fun `platformAdminScreen shows full individual and school signup details and deletes violating users`() {
+        val deletedLog = mutableListOf<Pair<String, String>>()
+        val parentUser = com.example.data.UserProfile(
+            id = "u_ind_1",
+            userId = "u_ind_1",
+            role = "parent",
+            displayName = "Amina Individual",
+            email = "amina@example.com",
+            phone = "+2348011122233",
+            homeAddress = "Lekki Phase 1, Lagos",
+            homeLat = 6.4474,
+            homeLng = 3.4737,
+            searchRadiusKm = 15L,
+            childSummary = "Primary 5 & JSS 1 student"
+        )
+        val schoolAdminUser = com.example.data.UserProfile(
+            id = "u_sch_1",
+            userId = "u_sch_1",
+            role = "admin",
+            displayName = "Greenhills Admissions",
+            email = "admissions@greenhills.edu.ng",
+            phone = "+2348099988877",
+            homeAddress = "Victoria Island, Lagos",
+            homeLat = 6.4281,
+            homeLng = 3.4219,
+            searchRadiusKm = 25L
+        )
+        val linkedSchool = School(
+            id = "sch_1",
+            adminUid = "u_sch_1",
+            adminName = "Greenhills Admissions",
+            name = "Greenhills Academy",
+            address = "Victoria Island, Lagos",
+            curriculum = "British & Nigerian",
+            contactPhone = "+2348099988877",
+            capacity = 600L,
+            enrolledCount = 410L
+        )
+
+        composeTestRule.setContent {
+            SchoolCompassTheme(darkTheme = false, dynamicColor = false) {
+                com.example.ui.PlatformAdminScreen(
+                    isPlatformAdmin = true,
+                    isBootstrappedOwner = true,
+                    currentUserEmail = SchoolConstants.PLATFORM_ADMIN_EMAIL,
+                    currentUserId = "owner_uid",
+                    allUsersState = UiState.Success(listOf(parentUser, schoolAdminUser)),
+                    schoolsState = UiState.Success(listOf(linkedSchool)),
+                    platformAdminsState = UiState.Success(emptyList()),
+                    visitStatsState = UiState.Success(null),
+                    visitLogsState = UiState.Success(emptyList()),
+                    onGrantAdmin = {},
+                    onRevokeAdmin = { _, _, _ -> },
+                    onDeleteUser = { u, reason -> deletedLog.add(u.userId to reason) },
+                    onVerifySchool = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("admin_user_card_u_ind_1"))
+        composeTestRule.onNodeWithText("Phone: +2348011122233", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Child / Student Info: Primary 5 & JSS 1 student", substring = true).assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("delete_user_button_u_ind_1"))
+        composeTestRule.onNodeWithTag("delete_user_button_u_ind_1").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("delete_user_confirm_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("delete_user_reason_input").performTextReplacement("Spam listings posted")
+        composeTestRule.onNodeWithTag("confirm_delete_user_button").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(listOf("u_ind_1" to "Spam listings posted"), deletedLog)
+
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("admin_segment_1"))
+        composeTestRule.onNodeWithTag("admin_segment_1").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("platform_admin_screen")
+            .performScrollToNode(hasTestTag("admin_user_card_u_sch_1"))
+        composeTestRule.onNodeWithText("Linked Schools (1)", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("Greenhills Academy", substring = true).assertIsDisplayed()
+    }
+}

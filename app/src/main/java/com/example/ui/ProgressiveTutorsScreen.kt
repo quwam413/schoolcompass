@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CastForEducation
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.VideoCall
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
@@ -55,6 +57,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -62,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.example.R
 import com.example.data.ProgressiveTutor
 import com.example.data.SchoolConstants
 import com.example.data.TutorSearchFilter
@@ -74,6 +78,7 @@ import com.example.ui.theme.StatusPresentGreen
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -86,12 +91,14 @@ fun ProgressiveTutorsScreen(
     filter: TutorSearchFilter,
     clientSessionsState: UiState<List<TutorSession>>,
     teacherSessionsState: UiState<List<TutorSession>>,
+    tutorVisitorCounts: Map<String, Int> = emptyMap(),
     isBusy: Boolean,
     onlineTutorsLoading: Boolean = false,
     onlineTutorsError: String? = null,
     onUpdateFilter: ((TutorSearchFilter) -> TutorSearchFilter) -> Unit,
     onResetFilters: () -> Unit,
     onSaveTutorProfile: (ProgressiveTutor, Boolean) -> Unit,
+    onInspectTutorPage: (ProgressiveTutor) -> Unit = {},
     onBookSession: (ProgressiveTutor, String, String, String, String, String?, Int, PaymentSubmissionDraft?) -> Unit,
     onPayForSession: (TutorSession, Long, String, PaymentSubmissionDraft) -> Unit = { _, _, _, _ -> },
     onUpdateSessionStatus: (TutorSession, String, String?) -> Unit,
@@ -109,30 +116,35 @@ fun ProgressiveTutorsScreen(
     var payingSession by remember { mutableStateOf<TutorSession?>(null) }
     var showAllSubjects by remember { mutableStateOf(false) }
 
+    val gpsScope = androidx.compose.runtime.rememberCoroutineScope()
+
     @SuppressLint("MissingPermission")
     fun centerClientOnGps() {
         val cts = CancellationTokenSource()
+        fun applyTutorGps(lat: Double, lng: Double) {
+            gpsScope.launch {
+                val placeLabel = com.example.data.GoogleMapsPlatformService.resolveHumanReadableLocation(
+                    context = context,
+                    latitude = lat,
+                    longitude = lng
+                )
+                onUpdateFilter {
+                    it.copy(
+                        clientLat = lat,
+                        clientLng = lng,
+                        clientLabel = placeLabel
+                    )
+                }
+            }
+        }
         fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
             .addOnSuccessListener { loc ->
-                val target = loc
-                if (target != null) {
-                    onUpdateFilter {
-                        it.copy(
-                            clientLat = target.latitude,
-                            clientLng = target.longitude,
-                            clientLabel = "Current GPS"
-                        )
-                    }
+                if (loc != null) {
+                    applyTutorGps(loc.latitude, loc.longitude)
                 } else {
                     fusedClient.lastLocation.addOnSuccessListener { last ->
                         if (last != null) {
-                            onUpdateFilter {
-                                it.copy(
-                                    clientLat = last.latitude,
-                                    clientLng = last.longitude,
-                                    clientLabel = "Current GPS"
-                                )
-                            }
+                            applyTutorGps(last.latitude, last.longitude)
                         }
                     }
                 }
@@ -150,6 +162,12 @@ fun ProgressiveTutorsScreen(
     }
 
     val allTutors = (tutorsUiState as? UiState.Success)?.data ?: emptyList()
+    val ownedTutors = remember(allTutors, currentUserId) {
+        if (currentUserId.isBlank()) emptyList() else allTutors.filter { it.teacherUid == currentUserId }
+    }
+    val totalTutorVisitors = remember(ownedTutors, tutorVisitorCounts) {
+        ownedTutors.sumOf { tutorVisitorCounts[it.id] ?: 0 }
+    }
     val clientSessions = (clientSessionsState as? UiState.Success)?.data ?: emptyList()
     val teacherSessions = (teacherSessionsState as? UiState.Success)?.data ?: emptyList()
 
@@ -222,6 +240,42 @@ fun ProgressiveTutorsScreen(
                             Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.size(6.dp))
                             Text(if (onlineTutorsLoading) "Searching…" else "Find via Google", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (ownedTutors.isNotEmpty()) {
+            item {
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("tutor_owner_visits_summary")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Visibility,
+                            contentDescription = "Your tutor page visitors",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Your Tutor Page Visitors",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = formatPageVisitorsLabel(totalTutorVisitors),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         }
                     }
                 }
@@ -493,11 +547,19 @@ fun ProgressiveTutorsScreen(
                         }
                     } else {
                         items(filteredTutors, key = { it.tutor.id }) { item ->
+                            val isOwner = item.tutor.teacherUid == currentUserId && currentUserId.isNotBlank()
                             TutorCard(
                                 item = item,
-                                isOwner = item.tutor.teacherUid == currentUserId && currentUserId.isNotBlank(),
-                                onBookSession = { bookingTutor = item.tutor },
-                                onOpenExternalUrl = { url -> runCatching { uriHandler.openUri(url) } },
+                                isOwner = isOwner,
+                                visitorCount = tutorVisitorCounts[item.tutor.id] ?: 0,
+                                onBookSession = {
+                                    onInspectTutorPage(item.tutor)
+                                    bookingTutor = item.tutor
+                                },
+                                onOpenExternalUrl = { url ->
+                                    onInspectTutorPage(item.tutor)
+                                    runCatching { uriHandler.openUri(url) }
+                                },
                                 onEditProfile = {
                                     editingTutor = item.tutor
                                     showTutorEditor = true
@@ -635,6 +697,7 @@ fun ProgressiveTutorsScreen(
 private fun TutorCard(
     item: TutorWithDistance,
     isOwner: Boolean,
+    visitorCount: Int = 0,
     onBookSession: () -> Unit,
     onOpenExternalUrl: (String) -> Unit,
     onEditProfile: () -> Unit
@@ -653,6 +716,24 @@ private fun TutorCard(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!t.bannerImageUrl.isNullOrBlank()) {
+                BannerImage(
+                    imageUrl = t.bannerImageUrl,
+                    fallbackResId = R.drawable.img_portal_academic,
+                    contentDescription = "${t.fullName} display banner",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .testTag("tutor_banner_${t.id}")
+                )
+            }
+            if (isOwner) {
+                PageVisitorsBadge(
+                    visitorCount = visitorCount,
+                    testTag = "tutor_visits_badge_${t.id}"
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

@@ -736,6 +736,14 @@ test("Bootstrapped super-admin can list users, enrollments, and payments for pla
   await assertSucceeds(superAdmin.collection("payments").get());
   await assertSucceeds(superAdmin.collection("advert_inquiries").get());
   await assertSucceeds(superAdmin.collection("tutor_sessions").get());
+
+  // Regular user cannot delete another user's profile; platform admin CAN delete a violating user
+  const attacker = testEnv.authenticatedContext(OTHER_PARENT_UID, {
+    email: "carol@example.com",
+    email_verified: true,
+  }).firestore();
+  await assertFails(attacker.collection("users").doc(PARENT_UID).delete());
+  await assertSucceeds(superAdmin.collection("users").doc(PARENT_UID).delete());
 });
 
 test("Verified online schools save without registration gate, allow lightweight optional enrichment, in-place claim, and parent inquiries", async () => {
@@ -996,3 +1004,204 @@ test("Platform admin delegation grants access strictly to owner and promoted adm
   await assertFails(carol.collection("users").get());
   await assertFails(carol.collection("app_analytics").doc("visits_summary").get());
 });
+
+test("Users, schools, adverts, and tutors can set, update, and clear valid bannerImageUrl while rejecting unsafe URLs", async () => {
+  const user = testEnv.authenticatedContext(PARENT_UID).firestore();
+  const owner = testEnv.authenticatedContext(ADMIN_UID).firestore();
+  const ts = pastDate(5000);
+  const sampleDataUri = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/";
+
+  // User profile banner create, data-URI update, and reject unsafe scheme
+  await assertSucceeds(
+    user.collection("users").doc(PARENT_UID).set({
+      userId: PARENT_UID,
+      role: "parent",
+      displayName: "Alice Parent",
+      email: "alice@example.com",
+      homeLat: 6.4281,
+      homeLng: 3.4219,
+      searchRadiusKm: 10,
+      bannerImageUrl: "https://cdn.example.com/alice-banner.jpg",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    user.collection("users").doc(PARENT_UID).update({
+      bannerImageUrl: sampleDataUri,
+      updatedAt: pastDate(2000),
+    })
+  );
+  await assertFails(
+    user.collection("users").doc(PARENT_UID).update({
+      bannerImageUrl: "javascript:alert(1)",
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // School owner banner create, update, and invalid scheme rejection
+  await assertSucceeds(
+    owner.collection("schools").doc("sch_banner_test").set({
+      ...makeSchoolPayload(ADMIN_UID),
+      bannerImageUrl: "https://cdn.example.com/school-banner.jpg",
+    })
+  );
+  await assertSucceeds(
+    owner.collection("schools").doc("sch_banner_test").update({
+      bannerImageUrl: sampleDataUri,
+      updatedAt: pastDate(1500),
+    })
+  );
+  await assertFails(
+    owner.collection("schools").doc("sch_banner_test").update({
+      bannerImageUrl: "ftp://bad.example.com/img.png",
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // Advert banner create & update
+  await assertSucceeds(
+    owner.collection("adverts").doc("adv_banner_test").set({
+      ownerUid: ADMIN_UID,
+      advertiserName: "Meadowhall Dual Academy",
+      title: "Admissions Showcase",
+      body: "Tour our campus and scholarships.",
+      category: "School Admissions",
+      curriculumFocus: "Nigerian & British",
+      planTier: "Featured Spotlight",
+      planPriceLabel: "₦35,000 / 14 days",
+      durationDays: 14,
+      targetLocation: "Lekki Phase 1, Lagos",
+      latitude: 6.4474,
+      longitude: 3.4737,
+      ctaLabel: "Inquire Now",
+      bannerImageUrl: "https://cdn.example.com/ad-banner.jpg",
+      status: "ACTIVE",
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+  await assertSucceeds(
+    owner.collection("adverts").doc("adv_banner_test").update({
+      bannerImageUrl: sampleDataUri,
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // Tutor banner create & update
+  await assertSucceeds(
+    owner.collection("tutors").doc("tut_banner_test").set({
+      teacherUid: ADMIN_UID,
+      fullName: "Mr. Samuel Kalu",
+      sex: "Male",
+      headline: "Cambridge Physics Mentor",
+      bio: "Interactive virtual physics coaching.",
+      curriculumTracks: ["Cambridge"],
+      cambridgeSubjects: ["Cambridge Physics"],
+      nigerianSubjects: [],
+      allSubjects: ["Cambridge Physics"],
+      qualifications: "B.Sc Physics, TRCN",
+      yearsExperience: 8,
+      hourlyRate: 8000,
+      currency: "NGN",
+      meetingPlatform: "Zoom",
+      availability: "Weekdays 4 PM",
+      locationLabel: "Ikoyi, Lagos",
+      latitude: 6.4549,
+      longitude: 3.4346,
+      rating: 4.9,
+      onlineActive: true,
+      bannerImageUrl: sampleDataUri,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+});
+
+test("Page visits track unique visitors per school or tutor, block self-visits, and restrict reads to owner and visitor", async () => {
+  const visitor = testEnv.authenticatedContext(PARENT_UID).firestore();
+  const secondVisitor = testEnv.authenticatedContext(OTHER_PARENT_UID).firestore();
+  const schoolOwner = testEnv.authenticatedContext(ADMIN_UID).firestore();
+  const outsider = testEnv.authenticatedContext(OTHER_ADMIN_UID).firestore();
+  const ts = pastDate(4000);
+  const visitDocId = "pv_school_oak_alice_101";
+
+  // Visitor checks non-existent visit doc before creating (allowed by resource == null rule)
+  await assertSucceeds(visitor.collection("page_visits").doc(visitDocId).get());
+
+  // First visit creates record with visitHits == 1
+  await assertSucceeds(
+    visitor.collection("page_visits").doc(visitDocId).set({
+      pageType: "school",
+      targetId: "school_oak",
+      targetTitle: "Meadowhall Dual Academy",
+      ownerUid: ADMIN_UID,
+      visitorUid: PARENT_UID,
+      visitorName: "Alice Parent",
+      visitHits: 1,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Repeat visit increments visitHits by +1
+  await assertSucceeds(
+    visitor.collection("page_visits").doc(visitDocId).update({
+      targetTitle: "Meadowhall Dual Academy",
+      visitorName: "Alice Parent",
+      visitHits: 2,
+      updatedAt: pastDate(1000),
+    })
+  );
+
+  // Forged visitHits jump (> +1) must fail
+  await assertFails(
+    visitor.collection("page_visits").doc(visitDocId).update({
+      visitHits: 10,
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Self-visit (ownerUid == visitorUid) must fail
+  await assertFails(
+    schoolOwner.collection("page_visits").doc("pv_self_visit").set({
+      pageType: "tutor",
+      targetId: "tut_1",
+      targetTitle: "Principal Bob",
+      ownerUid: ADMIN_UID,
+      visitorUid: ADMIN_UID,
+      visitorName: "Principal Bob",
+      visitHits: 1,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Second unique visitor for tutor page succeeds
+  await assertSucceeds(
+    secondVisitor.collection("page_visits").doc("pv_tutor_carol_202").set({
+      pageType: "tutor",
+      targetId: "tut_1",
+      targetTitle: "Principal Bob",
+      ownerUid: ADMIN_UID,
+      visitorUid: OTHER_PARENT_UID,
+      visitorName: "Carol Parent",
+      visitHits: 1,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+
+  // Owner can list all page_visits scoped by ownerUid (mirrors SchoolRepository.observeOwnerPageVisits)
+  const ownerSnap = await assertSucceeds(
+    schoolOwner.collection("page_visits").where("ownerUid", "==", ADMIN_UID).get()
+  );
+  if (ownerSnap.size !== 2) {
+    throw new Error(`Expected 2 unique page visits for owner, got ${ownerSnap.size}`);
+  }
+
+  // Third party cannot read or list someone else's page_visits
+  await assertFails(outsider.collection("page_visits").doc(visitDocId).get());
+  await assertFails(outsider.collection("page_visits").get());
+});
+

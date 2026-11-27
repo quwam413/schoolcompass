@@ -38,6 +38,8 @@ fun SavedSchoolsScreen(
     favoriteSchoolIds: Set<String>,
     selectedSchoolDetailState: UiState<School?> = UiState.Success(null),
     selectedSchoolAnnouncementsState: UiState<List<Announcement>> = UiState.Success(emptyList()),
+    currentUserId: String = "",
+    schoolVisitorCounts: Map<String, Int> = emptyMap(),
     onSelectSchoolForDetail: (School?) -> Unit = {},
     onToggleFavoriteSchool: (School) -> Unit,
     onMessageAdmin: (School) -> Unit,
@@ -122,11 +124,14 @@ fun SavedSchoolsScreen(
     selectedItem?.let { item ->
         val detailSchool = (selectedSchoolDetailState as? UiState.Success)?.data ?: item.school
         val isFav = (item.school.id in favoriteSchoolIds) || (detailSchool.id in favoriteSchoolIds)
+        val isOwned = currentUserId.isNotBlank() && detailSchool.adminUid == currentUserId
         SchoolDetailBottomSheet(
             item = item,
             firestoreDetailState = selectedSchoolDetailState,
             announcementsState = selectedSchoolAnnouncementsState,
             isFavorite = isFav,
+            isOwnedByCurrentUser = isOwned,
+            pageVisitorCount = schoolVisitorCounts[detailSchool.id] ?: 0,
             onToggleFavorite = onToggleFavoriteSchool,
             onDismiss = { selectedItem = null },
             onMessageAdmin = { school ->

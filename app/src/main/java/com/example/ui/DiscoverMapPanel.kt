@@ -1,7 +1,7 @@
 package com.example.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -65,6 +65,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -127,8 +129,16 @@ fun DiscoverMapSection(
     val centerLatLng = LatLng(filter.centerLat, filter.centerLng)
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    LaunchedEffect(Unit) {
-        runCatching { MapsInitializer.initialize(context.applicationContext) }
+    var googleMapHostReady by remember { mutableStateOf(false) }
+    LaunchedEffect(useLiveStreetMap) {
+        if (!useLiveStreetMap) {
+            withFrameNanos { }
+            delay(80L)
+            if (hasValidGoogleMapsKey) {
+                runCatching { MapsInitializer.initialize(context.applicationContext) }
+            }
+            googleMapHostReady = true
+        }
     }
 
     Column(
@@ -161,7 +171,12 @@ fun DiscoverMapSection(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (isNetworkOnline) "Live Map • ${if (useLiveStreetMap) "OpenStreetMap" else "Google Maps"}" else "Offline • Cached directory",
+                        text = if (isNetworkOnline) {
+                            if (filter.limitByRadius) "${filter.radiusKm} km radius • ${if (useLiveStreetMap) "Street Map" else "Google Maps"}"
+                            else "All distances • ${if (useLiveStreetMap) "Street Map" else "Google Maps"}"
+                        } else {
+                            "Offline • Cached directory"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -171,8 +186,11 @@ fun DiscoverMapSection(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                val gpsActive = filter.userGpsLat != null && filter.userGpsLng != null &&
+                    kotlin.math.abs(filter.centerLat - filter.userGpsLat) < 0.005 &&
+                    kotlin.math.abs(filter.centerLng - filter.userGpsLng) < 0.005
                 FilterChip(
-                    selected = filter.centerLabel == "Current GPS",
+                    selected = gpsActive || filter.centerLabel == "Current GPS",
                     onClick = onRequestGpsCenter,
                     leadingIcon = {
                         Icon(
@@ -367,6 +385,14 @@ fun DiscoverMapSection(
                             }
                         }
                     }
+
+                    RadiusFilterCard(
+                        filter = filter,
+                        matchCount = filteredSchools.size,
+                        isLocatingUser = isLocatingUser,
+                        onRequestGpsCenter = onRequestGpsCenter,
+                        onUpdateFilter = onUpdateFilter
+                    )
                 }
             }
         }
@@ -402,13 +428,16 @@ fun DiscoverMapSection(
         }
 
         // Integrated Minimalist Map Viewport
+        val mapContainerHeight by animateDpAsState(
+            targetValue = if (mapExpanded) 360.dp else 232.dp,
+            label = "map_container_height"
+        )
         Surface(
             shape = MaterialTheme.shapes.large,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
             modifier = Modifier
                 .fillMaxWidth()
-                .animateContentSize()
-                .height(if (mapExpanded) 360.dp else 232.dp)
+                .height(mapContainerHeight)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
             if (useLiveStreetMap) {
@@ -430,6 +459,15 @@ fun DiscoverMapSection(
                     onSelectSchool = onSelectSchool,
                     modifier = Modifier.fillMaxSize()
                 )
+            } else if (!googleMapHostReady) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("google_map_view"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                }
             } else {
                 GoogleMap(
                     modifier = Modifier
@@ -569,15 +607,6 @@ fun DiscoverMapSection(
             }
         }
         }
-
-        // Dedicated Minimalist Kilometer Search Radius Card
-        RadiusFilterCard(
-            filter = filter,
-            matchCount = filteredSchools.size,
-            isLocatingUser = isLocatingUser,
-            onRequestGpsCenter = onRequestGpsCenter,
-            onUpdateFilter = onUpdateFilter
-        )
     }
 }
 
@@ -589,7 +618,10 @@ fun RadiusFilterCard(
     onRequestGpsCenter: () -> Unit = {},
     onUpdateFilter: ((SchoolSearchFilter) -> SchoolSearchFilter) -> Unit
 ) {
-    val isCenteredOnGps = filter.centerLabel == "Current GPS"
+    val isCenteredOnGps = (filter.userGpsLat != null && filter.userGpsLng != null &&
+        kotlin.math.abs(filter.centerLat - filter.userGpsLat) < 0.005 &&
+        kotlin.math.abs(filter.centerLng - filter.userGpsLng) < 0.005) ||
+        filter.centerLabel == "Current GPS"
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -701,22 +733,32 @@ fun SchoolResultCard(
     onClick: () -> Unit
 ) {
     val s = item.school
-    val uriHandler = LocalUriHandler.current
-    val citations = remember(s.sourceCitations, s.googleMapsUrl, s.websiteUrl) { s.parsedCitations() }
 
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("school_card_${s.id}")
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (!s.bannerImageUrl.isNullOrBlank()) {
+                BannerImage(
+                    imageUrl = s.bannerImageUrl,
+                    fallbackResId = com.example.R.drawable.img_campus_hero,
+                    contentDescription = "${s.name} display banner",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(104.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                        .testTag("school_result_banner_${s.id}")
+                )
+            }
             // Top Header: Title, Location & Favorite Action
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -725,7 +767,7 @@ fun SchoolResultCard(
             ) {
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Text(
                         text = s.name,
@@ -756,7 +798,7 @@ fun SchoolResultCard(
                 }
             }
 
-            // Concise Verification & Key Attributes Strip (max 3–4 clean pills)
+            // Concise Verification & Key Attributes Strip (max 3 clean pills)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -800,16 +842,9 @@ fun SchoolResultCard(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (!s.boardingOption.isNullOrBlank() && s.boardingOption != "Not Specified") {
-                    AttributeBadge(
-                        text = s.boardingOption,
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
 
-            // Fee + Admission Status + Verified Source Line
+            // Fee + Admission Status + Optional Actions
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -838,51 +873,6 @@ fun SchoolResultCard(
                 }
             }
 
-            // Minimal Program / Source Summary
-            val summaryText = when {
-                s.gradeLevels.isNotEmpty() -> s.gradeLevels.joinToString(" • ")
-                s.coursesOffered.isNotEmpty() -> s.coursesOffered.take(3).joinToString(" • ")
-                s.isVerifiedOnline() -> s.primarySourceSummary()
-                else -> ""
-            }
-            if (summaryText.isNotBlank()) {
-                Text(
-                    text = summaryText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            if (citations.isNotEmpty()) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(citations.take(2)) { link ->
-                        FilterChip(
-                            selected = false,
-                            onClick = { runCatching { uriHandler.openUri(link.uri) } },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = if (link.sourceType == "Google Maps") Icons.Filled.Map else Icons.Filled.Public,
-                                    contentDescription = "Open ${link.sourceType} link",
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = "${link.sourceType}: ${link.title}",
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-
-            // Lightweight Optional Actions Footer
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

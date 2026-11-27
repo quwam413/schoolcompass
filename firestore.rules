@@ -9,6 +9,11 @@ service cloud.firestore {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
+    function isValidBannerUrl(url) {
+      return url is string && url.size() >= 8 && url.size() <= 160000 &&
+        (url.matches('^https?://.*') || url.matches('^data:image/[a-zA-Z0-9+]+;base64,.*'));
+    }
+
     function incoming() {
       return request.resource.data;
     }
@@ -71,6 +76,7 @@ service cloud.firestore {
         data.homeLng is number && data.homeLng >= -180.0 && data.homeLng <= 180.0 &&
         data.searchRadiusKm is int && data.searchRadiusKm >= 1 && data.searchRadiusKm <= 100 &&
         (!('childSummary' in data) || (data.childSummary is string && data.childSummary.size() <= 200)) &&
+        (!('bannerImageUrl' in data) || isValidBannerUrl(data.bannerImageUrl)) &&
         (!('favoriteSchoolIds' in data) || (data.favoriteSchoolIds is list && data.favoriteSchoolIds.size() <= 100 && (data.favoriteSchoolIds.size() == 0 || data.favoriteSchoolIds[0] is string))) &&
         data.createdAt is timestamp && data.createdAt <= request.time &&
         data.updatedAt is timestamp && data.updatedAt <= request.time;
@@ -120,6 +126,7 @@ service cloud.firestore {
         (!('googleMapsUrl' in data) || (data.googleMapsUrl is string && data.googleMapsUrl.size() <= 300)) &&
         (!('admissionWindow' in data) || (data.admissionWindow is string && data.admissionWindow.size() <= 120)) &&
         (!('boardingOption' in data) || (data.boardingOption in ['Day', 'Boarding', 'Day & Boarding', 'Not Specified'])) &&
+        (!('bannerImageUrl' in data) || isValidBannerUrl(data.bannerImageUrl)) &&
         (!('photoUrls' in data) || (data.photoUrls is list && data.photoUrls.size() <= 8 && (data.photoUrls.size() == 0 || (data.photoUrls[0] is string && data.photoUrls[0].size() <= 300)))) &&
         (!('extraNotes' in data) || (data.extraNotes is string && data.extraNotes.size() <= 600)) &&
         (!('lastEnrichedByName' in data) || (data.lastEnrichedByName is string && data.lastEnrichedByName.size() <= 80)) &&
@@ -136,7 +143,7 @@ service cloud.firestore {
         'tuitionTier', 'capacity', 'enrolledCount', 'admissionsOpen', 'contactPhone',
         'externalPlaceId', 'websiteUrl', 'verificationStatus', 'verificationSource',
         'sourceCitations', 'googleMapsPlaceRef', 'googleMapsUrl',
-        'admissionWindow', 'boardingOption', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
+        'admissionWindow', 'boardingOption', 'bannerImageUrl', 'photoUrls', 'extraNotes', 'lastEnrichedByName',
         'createdAt', 'updatedAt'
       ]);
     }
@@ -273,6 +280,7 @@ service cloud.firestore {
         data.longitude is number && data.longitude >= -180.0 && data.longitude <= 180.0 &&
         data.ctaLabel is string && data.ctaLabel.size() >= 2 && data.ctaLabel.size() <= 40 &&
         (!('contactInfo' in data) || (data.contactInfo is string && data.contactInfo.size() <= 120)) &&
+        (!('bannerImageUrl' in data) || isValidBannerUrl(data.bannerImageUrl)) &&
         data.status in ['ACTIVE', 'PAUSED', 'ENDED'] &&
         (!('paymentId' in data) || (data.paymentId is string && data.paymentId.size() <= 128)) &&
         (!('paymentStatus' in data) || (data.paymentStatus in ['UNPAID', 'PAID', 'PENDING_VERIFICATION'])) &&
@@ -318,6 +326,19 @@ service cloud.firestore {
         data.longitude is number && data.longitude >= -180.0 && data.longitude <= 180.0 &&
         data.rating is number && data.rating >= 1.0 && data.rating <= 5.0 &&
         data.onlineActive is bool &&
+        (!('bannerImageUrl' in data) || isValidBannerUrl(data.bannerImageUrl)) &&
+        data.createdAt is timestamp && data.createdAt <= request.time &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidPageVisit(data) {
+      return data.pageType in ['school', 'tutor'] &&
+        data.targetId is string && isValidId(data.targetId) &&
+        data.targetTitle is string && data.targetTitle.size() >= 1 && data.targetTitle.size() <= 120 &&
+        data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+        data.visitorUid is string && data.visitorUid.size() >= 1 && data.visitorUid.size() <= 128 &&
+        data.visitorName is string && data.visitorName.size() >= 1 && data.visitorName.size() <= 80 &&
+        data.visitHits is int && data.visitHits >= 1 && data.visitHits <= 100000 &&
         data.createdAt is timestamp && data.createdAt <= request.time &&
         data.updatedAt is timestamp && data.updatedAt <= request.time;
     }
@@ -370,7 +391,7 @@ service cloud.firestore {
         isOwner(userId) &&
         incoming().userId == request.auth.uid &&
         incoming().keys().hasAll(['userId', 'role', 'displayName', 'email', 'homeLat', 'homeLng', 'searchRadiusKm', 'createdAt', 'updatedAt']) &&
-        incoming().keys().hasOnly(['userId', 'role', 'displayName', 'email', 'phone', 'homeAddress', 'homeLat', 'homeLng', 'searchRadiusKm', 'childSummary', 'favoriteSchoolIds', 'createdAt', 'updatedAt']) &&
+        incoming().keys().hasOnly(['userId', 'role', 'displayName', 'email', 'phone', 'homeAddress', 'homeLat', 'homeLng', 'searchRadiusKm', 'childSummary', 'bannerImageUrl', 'favoriteSchoolIds', 'createdAt', 'updatedAt']) &&
         isValidUserProfile(incoming());
 
       allow update: if isValidId(userId) &&
@@ -379,9 +400,9 @@ service cloud.firestore {
         incoming().userId == existing().userId &&
         incoming().email == existing().email &&
         incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'phone', 'homeAddress', 'homeLat', 'homeLng', 'searchRadiusKm', 'childSummary', 'favoriteSchoolIds', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'phone', 'homeAddress', 'homeLat', 'homeLng', 'searchRadiusKm', 'childSummary', 'bannerImageUrl', 'favoriteSchoolIds', 'updatedAt']);
 
-      allow delete: if isValidId(userId) && isOwner(userId);
+      allow delete: if isValidId(userId) && (isOwner(userId) || isPlatformAdmin());
     }
 
     match /schools/{schoolId} {
@@ -643,7 +664,7 @@ service cloud.firestore {
         incoming().keys().hasOnly([
           'ownerUid', 'advertiserName', 'title', 'body', 'category', 'curriculumFocus',
           'planTier', 'planPriceLabel', 'durationDays', 'targetLocation', 'latitude',
-          'longitude', 'ctaLabel', 'contactInfo', 'status', 'paymentId', 'paymentStatus',
+          'longitude', 'ctaLabel', 'contactInfo', 'bannerImageUrl', 'status', 'paymentId', 'paymentStatus',
           'createdAt', 'updatedAt'
         ]);
 
@@ -656,7 +677,7 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasOnly([
           'advertiserName', 'title', 'body', 'category', 'curriculumFocus',
           'planTier', 'planPriceLabel', 'durationDays', 'targetLocation', 'latitude',
-          'longitude', 'ctaLabel', 'contactInfo', 'status', 'paymentId', 'paymentStatus', 'updatedAt'
+          'longitude', 'ctaLabel', 'contactInfo', 'bannerImageUrl', 'status', 'paymentId', 'paymentStatus', 'updatedAt'
         ]);
 
       allow delete: if isSignedIn() && isValidId(advertId) && (existing().ownerUid == request.auth.uid || isPlatformAdmin());
@@ -716,7 +737,7 @@ service cloud.firestore {
           'teacherUid', 'fullName', 'sex', 'headline', 'bio', 'curriculumTracks',
           'cambridgeSubjects', 'nigerianSubjects', 'allSubjects', 'qualifications',
           'yearsExperience', 'hourlyRate', 'currency', 'meetingPlatform', 'availability',
-          'locationLabel', 'latitude', 'longitude', 'rating', 'onlineActive',
+          'locationLabel', 'latitude', 'longitude', 'rating', 'onlineActive', 'bannerImageUrl',
           'createdAt', 'updatedAt'
         ]);
 
@@ -730,7 +751,7 @@ service cloud.firestore {
           'fullName', 'sex', 'headline', 'bio', 'curriculumTracks',
           'cambridgeSubjects', 'nigerianSubjects', 'allSubjects', 'qualifications',
           'yearsExperience', 'hourlyRate', 'currency', 'meetingPlatform', 'availability',
-          'locationLabel', 'latitude', 'longitude', 'rating', 'onlineActive', 'updatedAt'
+          'locationLabel', 'latitude', 'longitude', 'rating', 'onlineActive', 'bannerImageUrl', 'updatedAt'
         ]);
 
       allow delete: if isSignedIn() && isValidId(tutorId) && (existing().teacherUid == request.auth.uid || isPlatformAdmin());
@@ -894,6 +915,42 @@ service cloud.firestore {
         incoming().keys().hasOnly(['userId', 'userEmail', 'displayName', 'role', 'platform', 'createdAt']);
 
       allow update, delete: if false;
+    }
+
+    match /page_visits/{visitId} {
+      allow get: if isSignedIn() && isValidId(visitId) &&
+        (resource == null || existing().ownerUid == request.auth.uid || existing().visitorUid == request.auth.uid || isPlatformAdmin());
+      allow list: if isSignedIn() &&
+        (resource.data.ownerUid == request.auth.uid || resource.data.visitorUid == request.auth.uid || isPlatformAdmin());
+
+      allow create: if isSignedIn() &&
+        isValidId(visitId) &&
+        isValidPageVisit(incoming()) &&
+        incoming().visitorUid == request.auth.uid &&
+        incoming().ownerUid != request.auth.uid &&
+        incoming().visitHits == 1 &&
+        incoming().keys().hasAll([
+          'pageType', 'targetId', 'targetTitle', 'ownerUid', 'visitorUid',
+          'visitorName', 'visitHits', 'createdAt', 'updatedAt'
+        ]) &&
+        incoming().keys().hasOnly([
+          'pageType', 'targetId', 'targetTitle', 'ownerUid', 'visitorUid',
+          'visitorName', 'visitHits', 'createdAt', 'updatedAt'
+        ]);
+
+      allow update: if isSignedIn() &&
+        isValidId(visitId) &&
+        isValidPageVisit(incoming()) &&
+        existing().visitorUid == request.auth.uid &&
+        incoming().pageType == existing().pageType &&
+        incoming().targetId == existing().targetId &&
+        incoming().ownerUid == existing().ownerUid &&
+        incoming().visitorUid == existing().visitorUid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().visitHits == existing().visitHits + 1 &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['targetTitle', 'visitorName', 'visitHits', 'updatedAt']);
+
+      allow delete: if false;
     }
   }
 }

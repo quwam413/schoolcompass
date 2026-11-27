@@ -140,6 +140,7 @@ class CloudSqlSyncClient(
                 put("googleMapsUrl", school.googleMapsUrl ?: JSONObject.NULL)
                 put("admissionWindow", school.admissionWindow ?: JSONObject.NULL)
                 put("boardingOption", school.boardingOption ?: JSONObject.NULL)
+                put("bannerImageUrl", school.bannerImageUrl ?: JSONObject.NULL)
                 put("photoUrls", JSONArray(school.photoUrls))
                 put("extraNotes", school.extraNotes ?: JSONObject.NULL)
                 put("lastEnrichedByName", school.lastEnrichedByName ?: JSONObject.NULL)
@@ -205,6 +206,7 @@ class CloudSqlSyncClient(
                         googleMapsUrl = item.optNullableString("googleMapsUrl"),
                         admissionWindow = item.optNullableString("admissionWindow"),
                         boardingOption = item.optNullableString("boardingOption"),
+                        bannerImageUrl = item.optNullableString("bannerImageUrl"),
                         photoUrls = item.optStringList("photoUrls"),
                         extraNotes = item.optNullableString("extraNotes"),
                         lastEnrichedByName = item.optNullableString("lastEnrichedByName")
@@ -343,6 +345,7 @@ class CloudSqlSyncClient(
         homeLng: Double,
         searchRadiusKm: Int,
         childSummary: String?,
+        bannerImageUrl: String? = null,
         baseUrl: String = BuildConfig.SKOLQUIK_API_BASE_URL
     ): Result<Unit> = runCatching {
         val payload = JSONObject().apply {
@@ -356,6 +359,7 @@ class CloudSqlSyncClient(
             put("homeLng", homeLng)
             put("searchRadiusKm", searchRadiusKm)
             put("childSummary", childSummary ?: JSONObject.NULL)
+            put("bannerImageUrl", bannerImageUrl ?: JSONObject.NULL)
         }
         val (code, _) = executeRequest("PUT", "/api/sql/users/me", payload.toString(), baseUrl)
         check(code in 200..299) { "HTTP $code syncing profile to Cloud SQL" }

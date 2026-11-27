@@ -21,12 +21,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Verified
@@ -74,6 +79,7 @@ fun PlatformAdminScreen(
     isPlatformAdmin: Boolean,
     isBootstrappedOwner: Boolean,
     currentUserEmail: String,
+    currentUserId: String = "",
     allUsersState: UiState<List<UserProfile>>,
     schoolsState: UiState<List<School>>,
     platformAdminsState: UiState<List<PlatformAdminRecord>>,
@@ -84,6 +90,7 @@ fun PlatformAdminScreen(
     isBusy: Boolean = false,
     onGrantAdmin: (UserProfile) -> Unit,
     onRevokeAdmin: (userId: String, email: String, displayName: String) -> Unit,
+    onDeleteUser: (UserProfile, String) -> Unit = { _, _ -> },
     onVerifySchool: (School) -> Unit,
     onRefreshSqlOverview: () -> Unit = {},
     onBack: () -> Unit
@@ -161,6 +168,8 @@ fun PlatformAdminScreen(
     var selectedSegment by remember { mutableIntStateOf(0) } // 0=Individuals, 1=Schools, 2=Admins, 3=Visits
     var searchQuery by remember { mutableStateOf("") }
     var pendingRevokeAdmin by remember { mutableStateOf<PlatformAdminRecord?>(null) }
+    var pendingDeleteUser by remember { mutableStateOf<UserProfile?>(null) }
+    var deleteReasonText by remember { mutableStateOf("Violated platform rules & regulations") }
 
     val q = searchQuery.trim().lowercase()
     val filteredIndividuals = remember(individuals, q) {
@@ -168,7 +177,9 @@ fun PlatformAdminScreen(
         else individuals.filter {
             it.displayName.lowercase().contains(q) ||
                 it.email.lowercase().contains(q) ||
-                (it.homeAddress?.lowercase()?.contains(q) == true)
+                (it.phone?.lowercase()?.contains(q) == true) ||
+                (it.homeAddress?.lowercase()?.contains(q) == true) ||
+                (it.childSummary?.lowercase()?.contains(q) == true)
         }
     }
     val filteredSchoolUsers = remember(schoolUsers, q) {
@@ -176,7 +187,9 @@ fun PlatformAdminScreen(
         else schoolUsers.filter {
             it.displayName.lowercase().contains(q) ||
                 it.email.lowercase().contains(q) ||
-                (it.homeAddress?.lowercase()?.contains(q) == true)
+                (it.phone?.lowercase()?.contains(q) == true) ||
+                (it.homeAddress?.lowercase()?.contains(q) == true) ||
+                (it.childSummary?.lowercase()?.contains(q) == true)
         }
     }
     val filteredRegisteredSchools = remember(registeredSchools, q) {
@@ -408,15 +421,22 @@ fun PlatformAdminScreen(
                             val uid = user.userId.ifBlank { user.id }
                             val isOwnerRow = user.email.equals(SchoolConstants.PLATFORM_ADMIN_EMAIL, ignoreCase = true)
                             val isDelegated = uid in delegatedAdminUids || user.email.lowercase() in delegatedAdminEmails
+                            val ownedSchools = registeredSchools.filter { it.adminUid == uid }
                             SignedUpUserCard(
                                 user = user,
+                                ownedSchools = ownedSchools,
                                 isOwnerAccount = isOwnerRow,
                                 isDelegatedAdmin = isDelegated,
                                 canManageAdmins = isBootstrappedOwner,
+                                canDeleteUser = !isOwnerRow && uid != currentUserId,
                                 isBusy = isBusy,
                                 onMakeAdmin = { onGrantAdmin(user) },
                                 onRevokeAdmin = {
                                     onRevokeAdmin(uid, user.email, user.displayName)
+                                },
+                                onDeleteUser = {
+                                    deleteReasonText = "Violated platform rules & regulations"
+                                    pendingDeleteUser = user
                                 }
                             )
                         }
@@ -439,15 +459,22 @@ fun PlatformAdminScreen(
                                 val uid = user.userId.ifBlank { user.id }
                                 val isOwnerRow = user.email.equals(SchoolConstants.PLATFORM_ADMIN_EMAIL, ignoreCase = true)
                                 val isDelegated = uid in delegatedAdminUids || user.email.lowercase() in delegatedAdminEmails
+                                val ownedSchools = registeredSchools.filter { it.adminUid == uid }
                                 SignedUpUserCard(
                                     user = user,
+                                    ownedSchools = ownedSchools,
                                     isOwnerAccount = isOwnerRow,
                                     isDelegatedAdmin = isDelegated,
                                     canManageAdmins = isBootstrappedOwner,
+                                    canDeleteUser = !isOwnerRow && uid != currentUserId,
                                     isBusy = isBusy,
                                     onMakeAdmin = { onGrantAdmin(user) },
                                     onRevokeAdmin = {
                                         onRevokeAdmin(uid, user.email, user.displayName)
+                                    },
+                                    onDeleteUser = {
+                                        deleteReasonText = "Violated platform rules & regulations"
+                                        pendingDeleteUser = user
                                     }
                                 )
                             }
@@ -466,7 +493,9 @@ fun PlatformAdminScreen(
                                     shape = MaterialTheme.shapes.medium,
                                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier.fillMaxWidth()
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("admin_registered_school_${school.id}")
                                 ) {
                                     Column(
                                         modifier = Modifier.padding(14.dp),
@@ -494,8 +523,25 @@ fun PlatformAdminScreen(
                                             )
                                         }
                                         Text(
-                                            text = "Managed by ${school.adminName} • ${school.address}",
+                                            text = "Managed by ${school.adminName} (UID: ${school.adminUid})",
                                             style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "${school.address} • GPS ${String.format(Locale.US, "%.4f, %.4f", school.latitude, school.longitude)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = buildString {
+                                                append("Phone: ${school.contactPhone?.ifBlank { null } ?: "Not set"}")
+                                                append(" • Fees: ${formatSchoolFeeSummary(school)}")
+                                                if (school.capacity > 0L) {
+                                                    append(" • Enrolled: ${school.enrolledCount}/${school.capacity}")
+                                                }
+                                                append(if (school.admissionsOpen) " • Admissions Open" else " • Admissions Closed")
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                         TextButton(
@@ -671,6 +717,50 @@ fun PlatformAdminScreen(
             }
         )
     }
+
+    pendingDeleteUser?.let { targetUser ->
+        val targetLabel = targetUser.displayName.ifBlank { targetUser.email }
+        AlertDialog(
+            onDismissRequest = { pendingDeleteUser = null },
+            modifier = Modifier.testTag("delete_user_confirm_dialog"),
+            title = { Text("Delete Account for Rule Violation?", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "This permanently removes $targetLabel (${targetUser.email}) along with their schools, adverts, and tutor listings from the platform.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = deleteReasonText,
+                        onValueChange = { deleteReasonText = it },
+                        label = { Text("Violation reason") },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("delete_user_reason_input")
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteUser(targetUser, deleteReasonText)
+                        pendingDeleteUser = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("confirm_delete_user_button")
+                ) {
+                    Text("Delete Account")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteUser = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -723,15 +813,19 @@ private fun AdminStatTile(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SignedUpUserCard(
     user: UserProfile,
+    ownedSchools: List<School> = emptyList(),
     isOwnerAccount: Boolean,
     isDelegatedAdmin: Boolean,
     canManageAdmins: Boolean,
+    canDeleteUser: Boolean = false,
     isBusy: Boolean,
     onMakeAdmin: () -> Unit,
-    onRevokeAdmin: () -> Unit
+    onRevokeAdmin: () -> Unit,
+    onDeleteUser: () -> Unit = {}
 ) {
     val uid = user.userId.ifBlank { user.id }
     val roleLabel = if (user.role == "admin") "School Account" else "Individual"
@@ -745,7 +839,7 @@ private fun SignedUpUserCard(
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -759,9 +853,9 @@ private fun SignedUpUserCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = user.email,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary
+                        text = "Account UID: $uid",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -779,47 +873,140 @@ private fun SignedUpUserCard(
                     }
                 }
             }
-            Text(
-                text = buildString {
-                    append(user.homeAddress?.ifBlank { null } ?: "Location not set")
-                    append(" • Radius ${user.searchRadiusKm} km")
-                    if (!user.phone.isNullOrBlank()) append(" • ${user.phone}")
-                    val joined = user.createdAt?.toDate()?.time
-                    if (joined != null) append(" • Signed up ${formatTimestamp(joined)}")
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (canManageAdmins && !isOwnerAccount) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (isDelegatedAdmin) {
+                    SignupDetailLine(
+                        icon = Icons.Filled.Email,
+                        text = "Email: ${user.email.ifBlank { "Not provided" }}"
+                    )
+                    SignupDetailLine(
+                        icon = Icons.Filled.Phone,
+                        text = "Phone: ${user.phone?.ifBlank { null } ?: "Not provided"}"
+                    )
+                    SignupDetailLine(
+                        icon = Icons.Filled.LocationOn,
+                        text = "Address: ${user.homeAddress?.ifBlank { null } ?: "Not set"} • GPS ${String.format(Locale.US, "%.4f, %.4f", user.homeLat, user.homeLng)} • Radius ${user.searchRadiusKm} km"
+                    )
+                    SignupDetailLine(
+                        icon = Icons.Filled.Schedule,
+                        text = "Signed up: ${formatTimestamp(user.createdAt?.toDate()?.time)}"
+                    )
+                    if (!user.childSummary.isNullOrBlank()) {
+                        SignupDetailLine(
+                            icon = Icons.Filled.Person,
+                            text = if (user.role == "admin") {
+                                "Institution Notes: ${user.childSummary}"
+                            } else {
+                                "Child / Student Info: ${user.childSummary}"
+                            }
+                        )
+                    }
+                }
+            }
+
+            if (ownedSchools.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Linked Schools (${ownedSchools.size})",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    ownedSchools.forEach { school ->
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "${school.name} • ${school.institutionType} • ${school.curriculum} • ${school.verificationBadgeLabel()} • ${formatSchoolFeeSummary(school)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if ((canManageAdmins && !isOwnerAccount) || canDeleteUser) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (canManageAdmins && !isOwnerAccount) {
+                        if (isDelegatedAdmin) {
+                            OutlinedButton(
+                                onClick = onRevokeAdmin,
+                                enabled = !isBusy,
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.testTag("user_revoke_admin_$uid")
+                            ) {
+                                Icon(Icons.Filled.PersonRemove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(4.dp))
+                                Text("Revoke Admin")
+                            }
+                        } else {
+                            Button(
+                                onClick = onMakeAdmin,
+                                enabled = !isBusy,
+                                modifier = Modifier.testTag("user_make_admin_$uid")
+                            ) {
+                                Icon(Icons.Filled.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.size(4.dp))
+                                Text("Make Admin")
+                            }
+                        }
+                    }
+                    if (canDeleteUser) {
                         OutlinedButton(
-                            onClick = onRevokeAdmin,
+                            onClick = onDeleteUser,
                             enabled = !isBusy,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.testTag("user_revoke_admin_$uid")
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                            modifier = Modifier.testTag("delete_user_button_$uid")
                         ) {
-                            Icon(Icons.Filled.PersonRemove, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Filled.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.size(4.dp))
-                            Text("Revoke Admin")
-                        }
-                    } else {
-                        Button(
-                            onClick = onMakeAdmin,
-                            enabled = !isBusy,
-                            modifier = Modifier.testTag("user_make_admin_$uid")
-                        ) {
-                            Icon(Icons.Filled.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.size(4.dp))
-                            Text("Make Admin")
+                            Text("Delete User")
                         }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SignupDetailLine(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(14.dp)
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -841,6 +1028,19 @@ private fun AdminEmptyStateCard(message: String) {
 
 private fun formatNumber(value: Long): String =
     NumberFormat.getIntegerInstance().format(value)
+
+private fun formatSchoolFeeSummary(school: School): String {
+    if (school.feeMin <= 0L && school.feeMax <= 0L) {
+        return "${school.tuitionTier.ifBlank { "$$" }} (${school.feeCurrency})"
+    }
+    val fmt = NumberFormat.getIntegerInstance()
+    val range = if (school.feeMax > school.feeMin && school.feeMin > 0L) {
+        "${fmt.format(school.feeMin)}–${fmt.format(school.feeMax)}"
+    } else {
+        fmt.format(maxOf(school.feeMin, school.feeMax))
+    }
+    return "${school.feeCurrency} $range ${school.feePeriod}".trim()
+}
 
 private fun formatTimestamp(millis: Long?): String {
     if (millis == null || millis <= 0L) return "Just now"
